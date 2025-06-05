@@ -134,7 +134,7 @@ history = await yunhu.get_history(
 
 ## 注意事项
 1. 确保在调用 `startup()` 前完成所有处理器的注册
-2. 生产环境建议配置 HTTPS 和 Token 验证
+2. 生产环境建议配置服务器反向代理指向webhook地址以实现HTTPS
 3. 二进制内容（图片/视频等）需以 `bytes` 形式传入
 4. 程序退出时请调用 `shutdown()` 确保资源释放
 
