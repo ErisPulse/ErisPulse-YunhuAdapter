@@ -83,7 +83,7 @@ class YunhuAdapter(BaseAdapter):
 
         self.logger.debug(f"准备发送消息到 {target_id}， 会话类型: {conversation_type},  内容: {message}")
         if isinstance(message, str):
-            content_type = "text"
+            content_type = kwargs.get("content_type", "text")
             content = {"text": message, "buttons": buttons}
         elif isinstance(message, bytes):
             if kwargs.get("content_type") == "image":
