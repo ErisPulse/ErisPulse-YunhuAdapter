@@ -246,7 +246,7 @@ class YunhuAdapter(BaseAdapter):
         endpoint = "/bot/recall"
         payload = {
             "msgId": msg_id,
-            "chatId": target_id,
+            "chatId": str(target_id),
             "chatType": conversation_type
         }
 
