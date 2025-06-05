@@ -118,7 +118,26 @@ class YunhuAdapter(BaseAdapter):
 
         self.logger.debug(f"发送Call到`{endpoint}`")
         return await self._net_request("POST", endpoint, payload)
-
+    async def send_stream(self, conversation_type: str, target_id: str, content_type: str, content_generator, **kwargs) -> Dict:
+        endpoint = "/bot/send-stream"
+        params = {
+            "recvId": target_id,
+            "recvType": conversation_type,
+            "contentType": content_type
+        }
+        if "parent_id" in kwargs:
+            params["parentId"] = kwargs["parent_id"]
+        url = f"{self.base_url}{endpoint}?token={self.yhToken}"
+        query_params = "&".join([f"{k}={v}" for k, v in params.items()])
+        full_url = f"{url}&{query_params}"
+        self.logger.debug(f"准备发送流式消息到 {target_id}， 会话类型: {conversation_type}, 内容类型: {content_type}")
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+        headers = {
+            "Content-Type": "text/plain"
+        }
+        async with self.session.post(full_url, headers=headers, data=content_generator) as response:
+            return await response.json()
     async def batch_send(self, conversation_type: str, target_ids: List[str], message: Any, **kwargs):
         endpoint = "/bot/batch_send"
         buttons = kwargs.get("buttons", [])

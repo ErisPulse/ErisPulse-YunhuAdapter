@@ -132,6 +132,53 @@ history = await yunhu.get_history(
 )
 ```
 
+## 流式消息传输支持
+
+云湖适配器支持通过 **分块传输编码（Chunked Transfer Encoding）** 技术实现流式消息发送，适用于需要逐步生成或实时传输大量内容的场景。
+
+### 使用方式：
+
+通过新增的 send_stream 方法进行调用，需传入一个异步生成器作为内容源。
+
+```python
+async def stream_generator():
+    for i in range(5):
+        yield f"这是第 {i+1} 段内容\n".encode("utf-8")
+        await asyncio.sleep(1)
+
+await sdk.adapter.Yunhu.send_stream(
+    conversation_type="user",
+    target_id="user123",
+    content_type="text",
+    content_generator=stream_generator()
+)
+```
+
+### 参数说明：
+
+| 参数名 | 类型 | 必填 | 说明 |
+|-------|------|------|------|
+| `conversation_type` | `str` | 是 | 会话类型 (`user` 或 `group`) |
+| `target_id` | `str` | 是 | 接收方 ID |
+| `content_type` | `str` | 是 | 内容类型 (`text` 或 `markdown`) |
+| `content_generator` | `AsyncGenerator[bytes, None]` | 是 | 异步字节生成器，用于提供流式数据 |
+| `parent_id` | `str` | 否 | 父级消息 ID，用于关联上下文 |
+
+### 注意事项：
+
+1. 请确保 `content_generator` 是一个有效的异步生成器。
+2. 每次 `yield` 应返回 `bytes` 类型的数据。
+3. 收件端将按发送节奏逐步接收内容，适合长文本或实时生成内容的推送。
+
+### 典型应用场景：
+
+- AI 聊天机器人的逐步回复输出
+- 日志信息的实时推送
+- 大段文本或富文本内容的渐进式发送
+- 实时交互中的进度反馈
+
+如需进一步扩展，可结合压缩、加密、断点续传等功能进行增强。
+
 ## 注意事项
 1. 确保在调用 `startup()` 前完成所有处理器的注册
 2. 生产环境建议配置服务器反向代理指向webhook地址以实现HTTPS
