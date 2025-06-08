@@ -16,7 +16,7 @@ class Main:
         }
 
 class YunhuAdapter(sdk.BaseAdapter):
-    class Send(sdk.adapter.SendDSL):
+    class Send(sdk.SendDSL):
         def Text(self, text: str, buttons: List = None, parent_id: str = ""):
             return asyncio.create_task(
                 self._adapter.call_api(
