@@ -1,8 +1,8 @@
 import asyncio
 import aiohttp
 from aiohttp import web
-from typing import Dict, List, Optional, Any
-from ErisPulse.adapter import BaseAdapter
+from typing import Dict, List, Optional, Any, Callable
+from ErisPulse import sdk
 
 class Main:
     def __init__(self, sdk):
@@ -15,9 +15,178 @@ class Main:
             "Yunhu": YunhuAdapter
         }
 
-class YunhuAdapter(BaseAdapter):
+class YunhuAdapter(sdk.BaseAdapter):
+    class Send(sdk.adapter.SendDSL):
+        def Text(self, text: str, buttons: List = None, parent_id: str = ""):
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/bot/send",
+                    recvId=self._target_id,
+                    recvType=self._target_type,
+                    contentType="text",
+                    content={"text": text, "buttons": buttons},
+                    parentId=parent_id
+                )
+            )
+
+        def Image(self, file: bytes, buttons: List = None, parent_id: str = ""):
+            return asyncio.create_task(
+                self._upload_file_and_call_api(
+                    "/image/upload",
+                    field_name="image",
+                    file=file,
+                    endpoint="/bot/send",
+                    content_type="image",
+                    buttons=buttons,
+                    parent_id=parent_id
+                )
+            )
+
+        def Video(self, file: bytes, buttons: List = None, parent_id: str = ""):
+            return asyncio.create_task(
+                self._upload_file_and_call_api(
+                    "/video/upload",
+                    field_name="video",
+                    file=file,
+                    endpoint="/bot/send",
+                    content_type="video",
+                    buttons=buttons,
+                    parent_id=parent_id
+                )
+            )
+
+        def File(self, file: bytes, buttons: List = None, parent_id: str = ""):
+            return asyncio.create_task(
+                self._upload_file_and_call_api(
+                    "/file/upload",
+                    field_name="file",
+                    file=file,
+                    endpoint="/bot/send",
+                    content_type="file",
+                    buttons=buttons,
+                    parent_id=parent_id
+                )
+            )
+
+        def Batch(self, target_ids: List[str], message: Any, content_type: str = "text", **kwargs):
+            content = {"text": message} if isinstance(message, str) else {}
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/bot/batch_send",
+                    recvIds=target_ids,
+                    recvType=self._target_type,
+                    contentType=content_type,
+                    content=content,
+                    **kwargs
+                )
+            )
+
+        def Edit(self, msg_id: str, text: str, buttons: List = None):
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/bot/edit",
+                    msgId=msg_id,
+                    recvId=self._target_id,
+                    recvType=self._target_type,
+                    contentType="text",
+                    content={"text": text, "buttons": buttons}
+                )
+            )
+
+        def Recall(self, msg_id: str):
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/bot/recall",
+                    msgId=msg_id,
+                    chatId=self._target_id,
+                    chatType=self._target_type
+                )
+            )
+
+        def Board(self, scope: str, content: str, **kwargs):
+            if scope == "local":
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/board",
+                        chatId=kwargs["chat_id"],
+                        chatType=kwargs["chat_type"],
+                        contentType=kwargs.get("content_type", "text"),
+                        content={"text": content},
+                        memberId=kwargs.get("member_id", ""),
+                        expireTime=kwargs.get("expire_time", 0)
+                    )
+                )
+            else:
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/board-all",
+                        contentType=kwargs.get("content_type", "text"),
+                        content={"text": content},
+                        expireTime=kwargs.get("expire_time", 0)
+                    )
+                )
+
+        def DismissBoard(self, scope: str, **kwargs):
+            if scope == "local":
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/board-dismiss",
+                        chatId=kwargs["chat_id"],
+                        chatType=kwargs["chat_type"],
+                        memberId=kwargs.get("member_id", "")
+                    )
+                )
+            else:
+                return asyncio.create_task(
+                    self._adapter.call_api(endpoint="/bot/board-all-dismiss")
+                )
+
+        def Stream(self, content_type: str, content_generator, **kwargs):
+            return asyncio.create_task(
+                self._adapter.send_stream(
+                    conversation_type=self._target_type,
+                    target_id=self._target_id,
+                    content_type=content_type,
+                    content_generator=content_generator,
+                    **kwargs
+                )
+            )
+
+        async def _upload_file_and_call_api(self, upload_endpoint, field_name, file, endpoint, content_type, **kwargs):
+            url = f"{self._adapter.base_url}{upload_endpoint}?token={self._adapter.yhToken}"
+            data = aiohttp.FormData()
+            data.add_field(
+                field_name,
+                file,
+                filename=f"file.{field_name}",
+                content_type="application/octet-stream"
+            )
+
+            async with self._adapter.session.post(url, data=data) as response:
+                upload_res = await response.json()
+
+            key_map = {
+                "image": "imageKey",
+                "video": "videoKey",
+                "file": "fileKey"
+            }
+            key_name = key_map.get(field_name)
+
+            payload = {
+                "recvId": self._target_id,
+                "recvType": self._target_type,
+                "contentType": content_type,
+                "content": {key_name: upload_res["data"][key_name]},
+                "parentId": kwargs.get("parent_id", "")
+            }
+
+            if "buttons" in kwargs:
+                payload["content"]["buttons"] = kwargs["buttons"]
+
+            return await self._adapter.call_api(endpoint, **payload)
+
     def __init__(self, sdk):
-        super().__init__()
+        super().__init__(sdk)
         self.sdk = sdk
         self.logger = sdk.logger
         self.config = self._load_config()
@@ -58,66 +227,6 @@ class YunhuAdapter(BaseAdapter):
         ) as response:
             return await response.json()
 
-    async def _upload_file(self, endpoint: str, field_name: str, content: bytes) -> Dict:
-        url = f"{self.base_url}{endpoint}?token={self.yhToken}"
-        if not self.session:
-            self.session = aiohttp.ClientSession()
-
-        filename = f"file.{field_name}"
-        data = aiohttp.FormData()
-        data.add_field(
-            field_name,
-            content,
-            filename=filename,
-            content_type="application/octet-stream"
-        )
-
-        self.logger.debug(f"上传文件到{url}")
-        async with self.session.post(url, data=data) as response:
-            return await response.json()
-
-    async def send(self, conversation_type: str, target_id: str, message: Any, **kwargs):
-        endpoint = "/bot/send"
-        buttons = kwargs.get("buttons", [])
-        parent_id = kwargs.get("parent_id", "")
-
-        self.logger.debug(f"准备发送消息到 {target_id}， 会话类型: {conversation_type},  内容: {message}")
-        if isinstance(message, str):
-            content_type = kwargs.get("content_type", "text")
-            content = {"text": message, "buttons": buttons}
-        elif isinstance(message, bytes):
-            if kwargs.get("content_type") == "image":
-                self.logger.debug("开始上传图片")
-                upload_res = await self._upload_file("/image/upload", "image", message)
-                content_type = "image"
-                content = {"imageKey": upload_res["data"]["imageKey"], "buttons": buttons}
-            elif kwargs.get("content_type") == "video":
-                self.logger.debug("开始上传视频")
-                upload_res = await self._upload_file("/video/upload", "video", message)
-                content_type = "video"
-                content = {"videoKey": upload_res["data"]["videoKey"], "buttons": buttons}
-            elif kwargs.get("content_type") == "file":
-                self.logger.debug("开始上传文件")
-                upload_res = await self._upload_file("/file/upload", "file", message)
-                content_type = "file"
-                content = {"fileKey": upload_res["data"]["fileKey"], "buttons": buttons}
-            else:
-                self.logger.error("不支持的二进制内容类型")
-                raise ValueError("Unsupported binary content type")
-        else:
-            self.logger.error("不支持的消息类型")
-            raise ValueError("Unsupported message type")
-
-        payload = {
-            "recvId": target_id,
-            "recvType": conversation_type,
-            "contentType": content_type,
-            "content": content,
-            "parentId": parent_id
-        }
-
-        self.logger.debug(f"发送Call到`{endpoint}`")
-        return await self._net_request("POST", endpoint, payload)
     async def send_stream(self, conversation_type: str, target_id: str, content_type: str, content_generator, **kwargs) -> Dict:
         endpoint = "/bot/send-stream"
         params = {
@@ -130,148 +239,16 @@ class YunhuAdapter(BaseAdapter):
         url = f"{self.base_url}{endpoint}?token={self.yhToken}"
         query_params = "&".join([f"{k}={v}" for k, v in params.items()])
         full_url = f"{url}&{query_params}"
-        self.logger.debug(f"准备发送流式消息到 {target_id}， 会话类型: {conversation_type}, 内容类型: {content_type}")
+        self.logger.debug(f"准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}")
         if not self.session:
             self.session = aiohttp.ClientSession()
-        headers = {
-            "Content-Type": "text/plain"
-        }
+        headers = {"Content-Type": "text/plain"}
         async with self.session.post(full_url, headers=headers, data=content_generator) as response:
             return await response.json()
-    async def batch_send(self, conversation_type: str, target_ids: List[str], message: Any, **kwargs):
-        endpoint = "/bot/batch_send"
-        buttons = kwargs.get("buttons", [])
-        parent_id = kwargs.get("parent_id", "")
 
-        self.logger.debug(f"准备批量发送消息到{len(target_ids)}个目标")
-        if isinstance(message, str):
-            content_type = "text"
-            content = {"text": message, "buttons": buttons}
-        elif isinstance(message, bytes):
-            if kwargs.get("content_type") == "image":
-                self.logger.debug("开始批量上传图片")
-                upload_res = await self._upload_file("/image/upload", "image", message)
-                content_type = "image"
-                content = {"imageKey": upload_res["data"]["imageKey"], "buttons": buttons}
-            elif kwargs.get("content_type") == "video":
-                self.logger.debug("开始批量上传视频")
-                upload_res = await self._upload_file("/video/upload", "video", message)
-                content_type = "video"
-                content = {"videoKey": upload_res["data"]["videoKey"], "buttons": buttons}
-            elif kwargs.get("content_type") == "file":
-                self.logger.debug("开始批量上传文件")
-                upload_res = await self._upload_file("/file/upload", "file", message)
-                content_type = "file"
-                content = {"fileKey": upload_res["data"]["fileKey"], "buttons": buttons}
-            else:
-                self.logger.error("不支持的二进制内容类型")
-                raise ValueError("Unsupported binary content type")
-        else:
-            self.logger.error("不支持的消息类型")
-            raise ValueError("Unsupported message type")
-
-        payload = {
-            "recvIds": target_ids,
-            "recvType": conversation_type,
-            "contentType": content_type,
-            "content": content,
-            "parentId": parent_id
-        }
-
-        self.logger.debug(f"批量发送消息到{endpoint}")
-        return await self._net_request("POST", endpoint, payload)
-
-    async def publish_board(self, scope: str, content: str, **kwargs):
-        if scope == "local":
-            endpoint = "/bot/board"
-            payload = {
-                "chatId": kwargs["chat_id"],
-                "chatType": kwargs["chat_type"],
-                "contentType": kwargs.get("content_type", "text"),
-                "content": content,
-                "memberId": kwargs.get("member_id", ""),
-                "expireTime": kwargs.get("expire_time", 0)
-            }
-            self.logger.debug("发布局部公告看板")
-        else:
-            endpoint = "/bot/board-all"
-            payload = {
-                "contentType": kwargs.get("content_type", "text"),
-                "content": content,
-                "expireTime": kwargs.get("expire_time", 0)
-            }
-            self.logger.debug("发布全局公告看板")
-
-        return await self._net_request("POST", endpoint, payload)
-
-    async def dismiss_board(self, scope: str, **kwargs):
-        if scope == "local":
-            endpoint = "/bot/board-dismiss"
-            payload = {
-                "chatId": kwargs["chat_id"],
-                "chatType": kwargs["chat_type"],
-                "memberId": kwargs.get("member_id", "")
-            }
-            self.logger.debug("撤销局部公告看板")
-        else:
-            endpoint = "/bot/board-all-dismiss"
-            payload = {}
-            self.logger.debug("撤销全局公告看板")
-
-        return await self._net_request("POST", endpoint, payload)
-
-    async def edit(self, msg_id: str, conversation_type: str, target_id: str, message: Any, **kwargs):
-        endpoint = "/bot/edit"
-        buttons = kwargs.get("buttons", [])
-
-        self.logger.debug(f"准备编辑消息{msg_id}")
-        if isinstance(message, str):
-            content_type = "text"
-            content = {"text": message, "buttons": buttons}
-        else:
-            self.logger.error("当前仅支持文本编辑")
-            raise ValueError("Currently only text editing is supported")
-
-        payload = {
-            "msgId": msg_id,
-            "recvId": target_id,
-            "recvType": conversation_type,
-            "contentType": content_type,
-            "content": content
-        }
-
-        return await self._net_request("POST", endpoint, payload)
-
-    async def recall(self, msg_id: str, conversation_type: str, target_id: str):
-        endpoint = "/bot/recall"
-        payload = {
-            "msgId": msg_id,
-            "chatId": str(target_id),
-            "chatType": conversation_type
-        }
-
-        self.logger.debug(f"准备撤回消息{msg_id}")
-        return await self._net_request("POST", endpoint, payload)
-
-    async def get_history(self, conversation_type: str, target_id: str, **kwargs):
-        endpoint = "/bot/messages"
-        params = {
-            "chat-id": target_id,
-            "chat-type": conversation_type
-        }
-
-        if "before" in kwargs:
-            params["before"] = kwargs["before"]
-        if "after" in kwargs:
-            params["after"] = kwargs["after"]
-        if "msg_id" in kwargs:
-            params["message-id"] = kwargs["msg_id"]
-
-        query = "&".join(f"{k}={v}" for k, v in params.items())
-        url = f"{endpoint}?token={self.yhToken}&{query}"
-
-        self.logger.debug(f"查询历史消息:{query}")
-        return await self._net_request("GET", url)
+    async def call_api(self, endpoint: str, **params):
+        self.logger.debug(f"调用API:{endpoint}")
+        return await self._net_request("POST", endpoint, params)
 
     async def _handle_webhook(self, request: web.Request) -> web.Response:
         try:
@@ -326,7 +303,3 @@ class YunhuAdapter(BaseAdapter):
             await self.session.close()
             self.session = None
         self.logger.info("云湖适配器已关闭")
-
-    async def call_api(self, endpoint: str, **params) -> Any:
-        self.logger.debug(f"调用API:{endpoint}")
-        return await self._net_request("POST", endpoint, params)
