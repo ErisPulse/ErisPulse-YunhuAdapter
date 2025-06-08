@@ -28,6 +28,28 @@ class YunhuAdapter(sdk.BaseAdapter):
                     parentId=parent_id
                 )
             )
+        def Html(self, html: str, buttons: List = None, parent_id: str = ""):
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/bot/send",
+                    recvId=self._target_id,
+                    recvType=self._target_type,
+                    contentType="html",
+                    content={"text": html, "buttons": buttons},
+                    parentId=parent_id
+                )
+            )
+
+        def Markdown(self, markdown: str, buttons: List = None, parent_id: str = ""):
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/bot/send",
+                    recvId=self._target_id,
+                    recvType=self._target_type,
+                    contentType="markdown",
+                    content={"text": markdown, "buttons": buttons},
+                )
+            )
 
         def Image(self, file: bytes, buttons: List = None, parent_id: str = ""):
             return asyncio.create_task(
