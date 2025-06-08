@@ -208,7 +208,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return await self._adapter.call_api(endpoint, **payload)
 
     def __init__(self, sdk):
-        super().__init__(sdk)
+        super().__init__()
         self.sdk = sdk
         self.logger = sdk.logger
         self.config = self._load_config()
