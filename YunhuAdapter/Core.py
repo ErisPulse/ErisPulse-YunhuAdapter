@@ -173,6 +173,23 @@ class YunhuAdapter(sdk.BaseAdapter):
                     **kwargs
                 )
             )
+        async def CheckExist(self, message_id: str):
+            endpoint = "/bot/messages"
+            params = {
+                "chat-id": self._target_id,
+                "chat-type": self._target_type,
+                "message-id": message_id,
+                "before": 0,
+                "after": 0
+            }
+            url = f"{self._adapter.base_url}{endpoint}?token={self._adapter.yhToken}"
+            async with self._adapter.session.get(url, params=params) as response:
+                data = await response.json()
+                if data.get("code") != 1:
+                    self.logger.warning(f"云湖API返回异常: {data}")
+                    return False
+                msg_list = data.get("data", {}).get("list", [])
+                return any(msg["msgId"] == message_id for msg in msg_list)
 
         async def _upload_file_and_call_api(self, upload_endpoint, field_name, file, endpoint, content_type, **kwargs):
             url = f"{self._adapter.base_url}{upload_endpoint}?token={self._adapter.yhToken}"
