@@ -1,7 +1,7 @@
 // 您可搜索 `env.DB` 将它替换为您的D1绑定的实例
 /*
 请手动创建以下表：
-CREATE TABLE events (
+CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   data TEXT NOT NULL,
   timestamp INTEGER NOT NULL,
@@ -10,17 +10,28 @@ CREATE TABLE events (
   delivered BOOLEAN DEFAULT FALSE
 );
 
-CREATE TABLE sse_logs (
+CREATE TABLE IF NOT EXISTS sse_logs (
   id TEXT PRIMARY KEY,
   client_id TEXT NOT NULL,
   ip_address TEXT NOT NULL,
-  connect_time INTEGER NOT NULL
+  user_agent TEXT,
+  connect_time INTEGER NOT NULL,
+  disconnect_time INTEGER,
+  status TEXT
 );
 
-CREATE INDEX idx_events_timestamp ON events(timestamp);
-*/
+CREATE TABLE IF NOT EXISTS event_delivery_logs (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  delivery_time INTEGER NOT NULL,
+  status TEXT NOT NULL
+);
 
-// WebHook处理器
+CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+CREATE INDEX IF NOT EXISTS idx_sse_logs_client ON sse_logs(client_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_event ON event_delivery_logs(event_id);
+*/
 async function handleWebhook(request, env) {
     if (request.method !== "POST") {
         return new Response("Method Not Allowed", { status: 405 });
@@ -38,14 +49,26 @@ async function handleWebhook(request, env) {
         const payload = await request.json();
         const eventId = `event_${Math.floor(Date.now()/1000)}_${crypto.randomUUID()}`;
         
+        // 强制将 payload 转换为纯 JSON 可序列化的对象
+        const safePayload = JSON.parse(JSON.stringify(payload));
+        const payloadString = JSON.stringify(safePayload);
+
+        // 提取 event_type（确保是字符串）
+        let eventType = 'unknown';
+        if (payload.event && typeof payload.event === 'string') {
+            eventType = payload.event;
+        } else if (payload.type) {
+            eventType = String(payload.type);
+        }
+
         await env.DB.prepare(
             "INSERT INTO events (id, data, timestamp, source_ip, event_type) VALUES (?, ?, ?, ?, ?)"
         ).bind(
             eventId,
-            JSON.stringify(payload),
+            payloadString,
             Math.floor(Date.now() / 1000),
             request.headers.get('CF-Connecting-IP'),
-            payload.type || 'unknown'
+            eventType  // 确保是字符串
         ).run();
 
         return new Response(JSON.stringify({ 
@@ -123,33 +146,60 @@ async function handleSSE(request, env) {
         }
     };
 
-    // 发送初始事件
+    // 修改后的sendEvent函数
+    const sendEvent = async (eventType, eventData) => {
+        const eventPayload = {
+            event: eventType,
+            id: eventData.id,
+            timestamp: Date.now(),
+            data: typeof eventData.data === 'string' ? JSON.parse(eventData.data) : eventData.data
+        };
+        
+        await writer.write(encoder.encode(
+            `event: ${eventType}\n` +
+            `id: ${eventData.id}\n` +
+            `data: ${JSON.stringify(eventPayload)}\n\n`
+        ));
+    };
+
+    // 发送初始历史事件
     const sendInitialEvents = async () => {
         try {
             const { results } = await env.DB.prepare(
-                "SELECT id, data, timestamp FROM events WHERE delivered = FALSE ORDER BY timestamp DESC LIMIT 50"
+                "SELECT id, data, timestamp FROM events WHERE delivered = FALSE ORDER BY timestamp ASC LIMIT 50"
             ).all();
-
-            for (const event of results.reverse()) {
-                await writer.write(encoder.encode(
-                    `event: message\n` +
-                    `id: ${event.id}\n` +
-                    `data: ${JSON.stringify({
-                        id: event.id,
-                        data: JSON.parse(event.data),
-                        timestamp: event.timestamp
-                    })}\n\n`
-                ));
+    
+            for (const event of results) {
+                await sendEvent('message', {  // 统一使用message作为事件类型
+                    id: event.id,
+                    data: event.data,
+                    timestamp: event.timestamp
+                });
                 await markEventAsDelivered(event.id);
             }
+    
+            await writer.write(encoder.encode(
+                `event: system\n` +
+                `data: ${JSON.stringify({
+                    type: "init",
+                    status: 'ready',
+                    count: results.length,
+                    timestamp: Date.now()
+                })}\n\n`
+            ));
         } catch (error) {
             console.error("初始事件发送失败:", error);
         }
     };
 
-    // 心跳保持
     const keepAlive = setInterval(() => {
-        writer.write(encoder.encode(": heartbeat\n\n")).catch(() => {
+        writer.write(encoder.encode(
+            `event: system\n` +
+            `data: ${JSON.stringify({
+                type: "heartbeat",
+                timestamp: Date.now()
+            })}\n\n`
+        )).catch(() => {
             clearInterval(keepAlive);
             clearInterval(eventPoller);
         });
@@ -162,18 +212,14 @@ async function handleSSE(request, env) {
             const { results } = await env.DB.prepare(
                 "SELECT id, data, timestamp FROM events WHERE timestamp > ? AND delivered = FALSE ORDER BY timestamp ASC"
             ).bind(lastTimestamp).all();
-
+    
             if (results.length > 0) {
                 for (const event of results) {
-                    await writer.write(encoder.encode(
-                        `event: message\n` +
-                        `id: ${event.id}\n` +
-                        `data: ${JSON.stringify({
-                            id: event.id,
-                            data: JSON.parse(event.data),
-                            timestamp: event.timestamp
-                        })}\n\n`
-                    ));
+                    await sendEvent('message', {
+                        id: event.id,
+                        data: event.data,
+                        timestamp: event.timestamp
+                    });
                     await markEventAsDelivered(event.id);
                     lastTimestamp = event.timestamp;
                 }
