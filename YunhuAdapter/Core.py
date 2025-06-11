@@ -1,7 +1,8 @@
 import asyncio
 import aiohttp
+import json
 from aiohttp import web
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, AsyncGenerator
 from ErisPulse import sdk
 
 class Main:
@@ -28,6 +29,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     parentId=parent_id
                 )
             )
+
         def Html(self, html: str, buttons: List = None, parent_id: str = ""):
             return asyncio.create_task(
                 self._adapter.call_api(
@@ -173,6 +175,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     **kwargs
                 )
             )
+
         async def CheckExist(self, message_id: str):
             endpoint = "/bot/messages"
             params = {
@@ -234,6 +237,12 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.server: Optional[web.AppRunner] = None
         self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
         self._setup_event_mapping()
+        
+        # 事件接收模式配置
+        self.mode = self.config.get("mode", "server")  # server或polling
+        self.polling_config = self.config.get("polling", {})  # 保持与原worker配置一致
+        self.polling_task: Optional[asyncio.Task] = None
+        self.last_event_id = ""
 
     def _load_config(self) -> Dict:
         config = self.sdk.env.get("YunhuAdapter", {})
@@ -253,7 +262,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             "bot.shortcut.menu": "shortcut_menu"
         }
 
-    async def _net_request(self, method: str, endpoint: str, data: Dict = None) -> Dict:
+    async def _net_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None) -> Dict:
         url = f"{self.base_url}{endpoint}?token={self.yhToken}"
         if not self.session:
             self.session = aiohttp.ClientSession()
@@ -262,6 +271,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             method,
             url,
             json=data,
+            params=params,
             headers={"Content-Type": "application/json"}
         ) as response:
             return await response.json()
@@ -292,27 +302,128 @@ class YunhuAdapter(sdk.BaseAdapter):
     async def _handle_webhook(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
-            event_type = data["header"]["eventType"]
-            mapped_type = self.event_map.get(event_type, "unknown")
-
-            self.logger.debug(f"处理Webhook事件:{event_type} -> {mapped_type}")
-            await self.emit(mapped_type, data)
+            await self._process_webhook_event(data)
             return web.Response(text="OK", status=200)
         except Exception as e:
             self.logger.error(f"Webhook处理错误: {str(e)}")
             return web.Response(text=f"ERROR: {str(e)}", status=500)
 
+    async def _process_webhook_event(self, data: Dict):
+        """统一的事件处理方法"""
+        try:
+            if not isinstance(data, dict):
+                raise ValueError("事件数据必须是字典类型")
+
+            if "header" not in data or "eventType" not in data["header"]:
+                raise ValueError("无效的事件数据结构")
+
+            event_type = data["header"]["eventType"]
+            mapped_type = self.event_map.get(event_type, "unknown")
+            
+            self.logger.debug(f"处理事件: {event_type} -> {mapped_type}")
+            await self.emit(mapped_type, data)
+            
+        except Exception as e:
+            self.logger.error(f"处理事件错误: {str(e)}")
+            self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
+
+    async def _run_polling_client(self):
+        """SSE客户端实现（支持JSON格式）"""
+        if not self.polling_config.get("url"):
+            self.logger.error("未配置SSE URL，无法启动轮询模式")
+            return
+
+        headers = {
+            "Accept": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+        }
+        
+        if self.last_event_id:
+            headers["Last-Event-ID"] = self.last_event_id
+
+        while True:
+            try:
+                async with self.session.get(
+                    self.polling_config["url"],
+                    headers=headers,
+                    timeout=None
+                ) as response:
+                    if response.status != 200:
+                        raise Exception(f"SSE连接失败，状态码: {response.status}")
+
+                    current_event = None
+                    buffer = ""
+
+                    async for chunk in response.content:
+                        buffer += chunk.decode('utf-8')
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+                            if not line:
+                                continue
+                            self.logger.debug(f"SSE数据: {line}")
+                            if line.startswith("event:"):
+                                current_event = line[6:].strip()
+                            elif line.startswith("data:"):
+                                try:
+                                    data = json.loads(line[5:])
+                                    if current_event == "message":
+                                        await self._process_message_event(data)
+                                    elif current_event == "system":
+                                        self._process_system_event(data)
+                                except json.JSONDecodeError as e:
+                                    self.logger.error(f"JSON解析错误: {str(e)}")
+                            elif line.startswith("id:"):
+                                self.last_event_id = line[3:].strip()
+
+            except asyncio.CancelledError:
+                self.logger.info("SSE客户端被取消")
+                break
+            except Exception as e:
+                self.logger.error(f"SSE连接错误: {str(e)}，详细异常：", exc_info=True)
+
+    async def _process_message_event(self, data: Dict):
+        self.logger.debug(f"收到事件:{data}")
+        try:
+            if not isinstance(data, dict):
+                raise ValueError("消息数据必须是字典类型")
+
+            if isinstance(data.get("data"), str):
+                try:
+                    data["data"] = json.loads(data["data"])
+                except json.JSONDecodeError:
+                    pass
+            if isinstance(data.get("data"), dict) and "header" in data["data"]:
+                await self._process_webhook_event(data["data"])
+            else:
+                await self.emit("message", data)
+
+        except Exception as e:
+            self.logger.error(f"处理消息事件错误: {str(e)}")
+            self.logger.debug(f"原始消息数据: {json.dumps(data, ensure_ascii=False)}")
+
+    def _process_system_event(self, data: Dict):
+        try:
+            event_type = data.get("type")
+            if event_type == "init":
+                self.logger.info(f"SSE初始化完成，状态: {data.get('status')}")
+            elif event_type == "heartbeat":
+                self.logger.debug(f"心跳信号，时间戳: {data.get('timestamp')}")
+            else:
+                self.logger.warning(f"未知系统事件: {event_type}")
+        except Exception as e:
+            self.logger.error(f"处理系统事件错误: {str(e)}")
+
     async def start_server(self):
+        """启动Webhook服务器"""
         if not self.config.get("server"):
             self.logger.warning("Webhook服务器未配置，将不会启动")
             return
 
         server_config = self.config["server"]
         app = web.Application()
-        app.router.add_post(
-            server_config.get("path", "/"),
-            self._handle_webhook
-        )
+        app.router.add_post(server_config.get("path", "/"), self._handle_webhook)
 
         self.server = web.AppRunner(app)
         await self.server.setup()
@@ -332,12 +443,28 @@ class YunhuAdapter(sdk.BaseAdapter):
             self.logger.info("Webhook服务器已停止")
 
     async def start(self):
-        if self.config.get("server"):
-            self.logger.info("启动云湖适配器")
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+        if self.mode == "server":
             await self.start_server()
+        elif self.mode == "polling":
+            if self.polling_config.get("url"):
+                self.logger.info("启动SSE轮询客户端")
+                self.polling_task = asyncio.create_task(self._run_polling_client())
+            else:
+                self.logger.error("polling模式需要配置polling.url参数")
+        else:
+            self.logger.error(f"未知的模式配置: {self.mode}")
 
     async def shutdown(self):
         await self.stop_server()
+        if self.polling_task and not self.polling_task.done():
+            self.polling_task.cancel()
+            try:
+                await self.polling_task
+            except asyncio.CancelledError:
+                pass
         if self.session:
             await self.session.close()
             self.session = None
