@@ -240,14 +240,27 @@ class YunhuAdapter(sdk.BaseAdapter):
         
         # 事件接收模式配置
         self.mode = self.config.get("mode", "server")  # server或polling
-        self.polling_config = self.config.get("polling", {})  # 保持与原worker配置一致
+        self.polling_config = self.config.get("polling", {})
         self.polling_task: Optional[asyncio.Task] = None
         self.last_event_id = ""
 
     def _load_config(self) -> Dict:
         config = self.sdk.env.get("YunhuAdapter", {})
         if not config:
-            self.logger.warning("云湖配置缺失，请在env.py中添加配置")
+            self.logger.warning("""云湖配置缺失，请在env.py中添加配置
+sdk.env.set("YunhuAdapter", {
+    "token": "",
+    "mode": "server",  # server / polling
+    "server": {
+        "host": "0.0.0.0",
+        "port": 25888,
+        "path": "/yunhu/webhook"
+    },
+    
+    "polling": {
+        "url": "https://sse.bot.anran.xyz/sse",
+    }
+})""")
         return config
 
     def _setup_event_mapping(self):
