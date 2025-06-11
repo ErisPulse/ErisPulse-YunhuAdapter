@@ -34,3 +34,5 @@ adapterInfo = {
 # build_hash="dd617defe4b722d07016fa1523975e1c0d8d064ea8e6e7d7586c1b2c76943db3"
 
 # build_hash="62368c8d380f4e99b434bcae7d3e2fab49e8172a548bc1500a008e09bafa7b34"
+
+# build_hash="389ed5c27069185f04abb3b07ade7a9d1fdcd40e302b28bf6fe129bcd3401846"
