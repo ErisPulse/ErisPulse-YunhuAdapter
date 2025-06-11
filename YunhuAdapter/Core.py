@@ -322,7 +322,6 @@ sdk.env.set("YunhuAdapter", {
             return web.Response(text=f"ERROR: {str(e)}", status=500)
 
     async def _process_webhook_event(self, data: Dict):
-        """统一的事件处理方法"""
         try:
             if not isinstance(data, dict):
                 raise ValueError("事件数据必须是字典类型")
@@ -332,16 +331,15 @@ sdk.env.set("YunhuAdapter", {
 
             event_type = data["header"]["eventType"]
             mapped_type = self.event_map.get(event_type, "unknown")
-            
-            self.logger.debug(f"处理事件: {event_type} -> {mapped_type}")
+
+            self.logger.debug(f"[SSE] 事件 {event_type} -> {mapped_type}")
             await self.emit(mapped_type, data)
-            
+
         except Exception as e:
             self.logger.error(f"处理事件错误: {str(e)}")
             self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
 
     async def _run_polling_client(self):
-        """SSE客户端实现（支持JSON格式）"""
         if not self.polling_config.get("url"):
             self.logger.error("未配置SSE URL，无法启动轮询模式")
             return
@@ -351,7 +349,7 @@ sdk.env.set("YunhuAdapter", {
             "Cache-Control": "no-cache",
             "Connection": "keep-alive"
         }
-        
+
         if self.last_event_id:
             headers["Last-Event-ID"] = self.last_event_id
 
@@ -397,7 +395,6 @@ sdk.env.set("YunhuAdapter", {
                 self.logger.error(f"SSE连接错误: {str(e)}，详细异常：", exc_info=True)
 
     async def _process_message_event(self, data: Dict):
-        self.logger.debug(f"收到事件:{data}")
         try:
             if not isinstance(data, dict):
                 raise ValueError("消息数据必须是字典类型")
@@ -413,23 +410,22 @@ sdk.env.set("YunhuAdapter", {
                 await self.emit("message", data)
 
         except Exception as e:
-            self.logger.error(f"处理消息事件错误: {str(e)}")
             self.logger.debug(f"原始消息数据: {json.dumps(data, ensure_ascii=False)}")
 
     def _process_system_event(self, data: Dict):
         try:
             event_type = data.get("type")
             if event_type == "init":
-                self.logger.info(f"SSE初始化完成，状态: {data.get('status')}")
+                self.logger.info(f"Yunhu-SSE初始化完成，状态: {data.get('status')}")
             elif event_type == "heartbeat":
-                self.logger.debug(f"心跳信号，时间戳: {data.get('timestamp')}")
+                self.logger.debug(f"[SSE] heartbeat | {data.get('timestamp')}")
+                pass
             else:
                 self.logger.warning(f"未知系统事件: {event_type}")
         except Exception as e:
             self.logger.error(f"处理系统事件错误: {str(e)}")
 
     async def start_server(self):
-        """启动Webhook服务器"""
         if not self.config.get("server"):
             self.logger.warning("Webhook服务器未配置，将不会启动")
             return
