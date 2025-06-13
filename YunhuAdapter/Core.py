@@ -19,6 +19,12 @@ class Main:
 class YunhuAdapter(sdk.BaseAdapter):
     class Send(sdk.SendDSL):
         def Text(self, text: str, buttons: List = None, parent_id: str = ""):
+            if not isinstance(text, str):
+                try:
+                    text = str(text)
+                except Exception:
+                    raise ValueError("text 必须可转换为字符串")
+
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/send",
@@ -31,6 +37,12 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
         def Html(self, html: str, buttons: List = None, parent_id: str = ""):
+            if not isinstance(html, str):
+                try:
+                    html = str(html)
+                except Exception:
+                    raise ValueError("html 必须可转换为字符串")
+
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/send",
@@ -43,6 +55,12 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
         def Markdown(self, markdown: str, buttons: List = None, parent_id: str = ""):
+            if not isinstance(markdown, str):
+                try:
+                    markdown = str(markdown)
+                except Exception:
+                    raise ValueError("markdown 必须可转换为字符串")
+
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/send",
@@ -93,6 +111,12 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
         def Batch(self, target_ids: List[str], message: Any, content_type: str = "text", **kwargs):
+            if not isinstance(message, str):
+                try:
+                    message = str(message)
+                except Exception:
+                    raise ValueError("message 必须可转换为字符串")
+
             content = {"text": message} if isinstance(message, str) else {}
             return asyncio.create_task(
                 self._adapter.call_api(
@@ -105,15 +129,21 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        def Edit(self, msg_id: str, text: str, buttons: List = None):
+        def Edit(self, msg_id: str, text: Any, content_type: str = "text"):
+            if not isinstance(text, str):
+                try:
+                    text = str(text)
+                except Exception:
+                    raise ValueError("text 必须可转换为字符串")
+
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/edit",
                     msgId=msg_id,
                     recvId=self._target_id,
                     recvType=self._target_type,
-                    contentType="text",
-                    content={"text": text, "buttons": buttons}
+                    contentType=content_type,
+                    content={"text": text}
                 )
             )
 
@@ -274,25 +304,31 @@ sdk.env.set("YunhuAdapter", {
             "button.report.inline": "button_click",
             "bot.shortcut.menu": "shortcut_menu"
         }
-
     async def _net_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None) -> Dict:
         url = f"{self.base_url}{endpoint}?token={self.yhToken}"
         if not self.session:
             self.session = aiohttp.ClientSession()
 
+        json_data = json.dumps(data) if data else None
+        headers = {"Content-Type": "application/json; charset=utf-8"}
+
+        self.logger.debug(f"[{endpoint}]|[{method}] 请求数据: {json_data} | 参数: {params}")
+
         async with self.session.request(
             method,
             url,
-            json=data,
+            data=json_data,
             params=params,
-            headers={"Content-Type": "application/json"}
+            headers=headers
         ) as response:
             content_type = response.headers.get("Content-Type", "")
             if "application/json" in content_type:
-                return await response.json()
+                result = await response.json()
+                self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
+                return result
             else:
                 text = await response.text()
-                self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}...")  # 记录前500字符用于调试
+                self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}")
                 return {"error": "Invalid content type", "content_type": content_type, "status": response.status, "raw": text}
 
     async def send_stream(self, conversation_type: str, target_id: str, content_type: str, content_generator, **kwargs) -> Dict:
