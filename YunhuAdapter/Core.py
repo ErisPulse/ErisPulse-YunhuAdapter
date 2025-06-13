@@ -287,7 +287,13 @@ sdk.env.set("YunhuAdapter", {
             params=params,
             headers={"Content-Type": "application/json"}
         ) as response:
-            return await response.json()
+            content_type = response.headers.get("Content-Type", "")
+            if "application/json" in content_type:
+                return await response.json()
+            else:
+                text = await response.text()
+                self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}...")  # 记录前500字符用于调试
+                return {"error": "Invalid content type", "content_type": content_type, "status": response.status, "raw": text}
 
     async def send_stream(self, conversation_type: str, target_id: str, content_type: str, content_generator, **kwargs) -> Dict:
         endpoint = "/bot/send-stream"
