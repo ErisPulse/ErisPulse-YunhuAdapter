@@ -37,8 +37,6 @@ if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
 ```
-好的！根据你提到的已改为 `Send.To().xxx` 链式调用风格，以下是更新后的 **README.md** 示例内容：
-
 ---
 
 ## 消息发送示例
