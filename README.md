@@ -5,6 +5,55 @@ YunhuAdapter 是基于 [ErisPulse](https://github.com/ErisPulse/ErisPulse/) 架�
 
 ## 使用示例
 
+### 事件映射关系
+| 官方事件命名 | Adapter事件命名 |
+|--------------|----------------|
+| message.receive.normal | message |
+| message.receive.instruction | command |
+| bot.followed | follow |
+| bot.unfollowed | unfollow |
+| group.join | group_join |
+| group.leave | group_leave |
+| button.report.inline | button_click |
+| bot.shortcut.menu | shortcut_menu |
+
+### 官方事件内容示例
+```json
+{
+    "version": "1.0",
+    "header": {
+        "eventId": "xxxxx",
+        "eventTime": 1647735644000,
+        "eventType": "message.receive.instruction"
+    },
+    "event": {
+        "sender": {
+            "senderId": "xxxxx",
+            "senderType": "user",
+            "senderUserLevel": "member",
+            "senderNickname": "昵称"
+        },
+        "chat": {
+            "chatId": "xxxxx",
+            "chatType": "group"
+        },
+        "message": {
+            "msgId": "xxxxxx",
+            "parentId": "xxxx",
+            "sendTime": 1647735644000,
+            "chatId": "xxxxxxxx",
+            "chatType": "group",
+            "contentType": "text",
+            "content": {
+                "text": "早上好"
+            },
+            "commandId": 98,
+            "commandName": "计算器"
+        }
+    }
+}
+```
+
 ### 初始化与事件处理
 ```python
 from ErisPulse import sdk
@@ -19,13 +68,33 @@ async def main():
     # 注册事件处理器
     @yunhu.on("message")
     async def handle_message(data):
-        print(f"收到消息: {data}")
-        await yunhu.send("user", data["event"]["sender"]["id"], "已收到您的消息！")
+        """处理普通消息事件"""
+        sender = data["event"]["sender"]["id"]
+        message = data["event"]["message"]["content"]["text"]
+        print(f"收到消息: {message}")
+        await yunhu.Send.To("user", sender).Text(f"已收到消息: {message}")
+
+    @yunhu.on("command")
+    async def handle_command(data):
+        """处理指令事件"""
+        command_info = data["event"]["message"]
+        sender_id = data["event"]["sender"]["id"]
+        command_name = command_info["commandName"]
+        command_args = command_info["content"]["text"].split()[1:]
+        
+        print(f"收到指令: {command_name}, 参数: {command_args}")
+        
+        if command_name == "计算器":
+            result = calculate(*command_args)
+            await yunhu.Send.To("user", sender_id).Text(f"计算结果: {result}")
+        else:
+            await yunhu.Send.To("user", sender_id).Text(f"未知指令: {command_name}")
 
     @yunhu.on("follow")
     async def handle_follow(data):
         print(f"新关注: {data}")
-        await yunhu.send("user", data["event"]["user"]["id"], "感谢关注！")
+        user_id = data["event"]["user"]["id"]
+        await yunhu.Send.To("user", user_id).Text("感谢关注！")
 
     # 启动适配器
     await sdk.adapter.startup()
@@ -37,6 +106,7 @@ if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
 ```
+
 ---
 
 ## 消息发送示例
@@ -64,44 +134,6 @@ await yunhu.Send.To("user", "user123").Edit("msg_abc123", "修改后的内容")
 
 # 撤回消息
 await yunhu.Send.To("group", "group456").Recall("msg_abc123")
-```
-
----
-
-### 使用示例
-
-#### 初始化与事件处理
-
-```python
-from ErisPulse import sdk
-
-async def main():
-    # 初始化 SDK
-    sdk.init()
-
-    # 获取适配器实例
-    yunhu = sdk.adapter.Yunhu
-
-    # 注册事件处理器
-    @yunhu.on("message")
-    async def handle_message(data):
-        sender = data["event"]["sender"]["id"]
-        await yunhu.Send.To("user", sender).Text("已收到您的消息！")
-
-    @yunhu.on("follow")
-    async def handle_follow(data):
-        user_id = data["event"]["user"]["id"]
-        await yunhu.Send.To("user", user_id).Text("感谢关注！")
-
-    # 启动适配器
-    await sdk.adapter.startup()
-
-    # 保持程序运行
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
 ```
 
 ---
@@ -163,10 +195,12 @@ await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
 
 ### 注意事项：
 
-1. 确保在调用 `startup()` 前完成所有处理器的注册。
-2. 生产环境建议配置服务器反向代理指向 webhook 地址以实现 HTTPS。
-3. 二进制内容（图片/视频等）需以 `bytes` 形式传入。
-4. 程序退出时请调用 `shutdown()` 确保资源释放。
+1. 确保在调用 `startup()` 前完成所有处理器的注册
+2. 生产环境建议配置服务器反向代理指向 webhook 地址以实现 HTTPS
+3. 二进制内容（图片/视频等）需以 `bytes` 形式传入
+4. 程序退出时请调用 `shutdown()` 确保资源释放
+5. 指令事件中的 commandId 是唯一标识符，可用于区分不同的指令
+6. 官方事件数据结构需通过 `data["event"]` 访问
 
 ---
 
