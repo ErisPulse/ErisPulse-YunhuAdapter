@@ -1,7 +1,7 @@
 moduleInfo = {
     "meta": {
         "name": "YunhuAdapter",
-        "version": "2.2.5",
+        "version": "2.2.6",
         "description": "云湖协议适配器，整合所有云湖功能模块",
         "author": "r1a, WSu2059",
         "license": "MIT",
@@ -20,5 +20,7 @@ from .Core import YunhuAdapter
 
 adapterInfo = {
     "yunhu": YunhuAdapter,
-    "Yunhu": YunhuAdapter,
+    "yh": YunhuAdapter,
 }
+
+# build_hash="d0cc154d4e8266fd5cc0a01be2cf39b88c6e153433ed1796b7f3512d6e34868f"
