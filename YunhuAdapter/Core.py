@@ -17,7 +17,7 @@ class Main:
         }
 
 class YunhuAdapter(sdk.BaseAdapter):
-    class Send(sdk.SendDSL):
+    class Send(super().Send):
         def Text(self, text: str, buttons: List = None, parent_id: str = ""):
             if not isinstance(text, str):
                 try:
