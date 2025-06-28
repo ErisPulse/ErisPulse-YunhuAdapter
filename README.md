@@ -69,7 +69,7 @@ async def main():
     @yunhu.on("message")
     async def handle_message(data):
         """处理普通消息事件"""
-        sender = data["event"]["sender"]["id"]
+        sender = data["event"]["sender"]["senderId"]
         message = data["event"]["message"]["content"]["text"]
         print(f"收到消息: {message}")
         await yunhu.Send.To("user", sender).Text(f"已收到消息: {message}")
@@ -78,22 +78,20 @@ async def main():
     async def handle_command(data):
         """处理指令事件"""
         command_info = data["event"]["message"]
-        sender_id = data["event"]["sender"]["id"]
+        sender_id = data["event"]["sender"]["senderId"]
         command_name = command_info["commandName"]
-        command_args = command_info["content"]["text"].split()[1:]
         
         print(f"收到指令: {command_name}, 参数: {command_args}")
         
         if command_name == "计算器":
-            result = calculate(*command_args)
-            await yunhu.Send.To("user", sender_id).Text(f"计算结果: {result}")
+            await yunhu.Send.To("user", sender_id).Text(f"计算结果: 114514")
         else:
             await yunhu.Send.To("user", sender_id).Text(f"未知指令: {command_name}")
 
     @yunhu.on("follow")
     async def handle_follow(data):
         print(f"新关注: {data}")
-        user_id = data["event"]["user"]["id"]
+        user_id = data["event"]["sender"]["senderId"]
         await yunhu.Send.To("user", user_id).Text("感谢关注！")
 
     # 启动适配器
