@@ -1,20 +1,17 @@
 import asyncio
 import aiohttp
+import io
 import json
+import mimetypes
 from aiohttp import web
 from typing import Dict, List, Optional, Any, AsyncGenerator
+import filetype
 from ErisPulse import sdk
 
 class Main:
     def __init__(self, sdk):
         self.sdk = sdk
         self.logger = sdk.logger
-
-    def register_adapters(self):
-        self.logger.debug("注册云湖适配器")
-        return {
-            "Yunhu": YunhuAdapter
-        }
 
 class YunhuAdapter(sdk.BaseAdapter):
     class Send(sdk.BaseAdapter.Send):
@@ -227,22 +224,47 @@ class YunhuAdapter(sdk.BaseAdapter):
         async def _upload_file_and_call_api(self, upload_endpoint, field_name, file, endpoint, content_type, **kwargs):
             url = f"{self._adapter.base_url}{upload_endpoint}?token={self._adapter.yhToken}"
             data = aiohttp.FormData()
-            data.add_field(
-                field_name,
-                file,
-                filename=f"file.{field_name}",
-                content_type="application/octet-stream"
-            )
+            
+            try:
+                file_info = filetype.guess(file)
+                if file_info:
+                    filename = f"file.{file_info.extension}"
+                    mime_type = file_info.mime
+                else:
+                    filename = f"file.{field_name}"
+                    mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                
+                data.add_field(
+                    name=field_name,
+                    value=io.BufferedReader(io.BytesIO(file)),
+                    filename=filename,
+                    content_type=mime_type
+                )
+            except Exception as e:
+                self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
+                data.add_field(
+                    name=field_name,
+                    value=file,
+                    filename=f"file.{field_name}",
+                )
 
             async with self._adapter.session.post(url, data=data) as response:
                 upload_res = await response.json()
+                self._adapter.logger.debug(f"上传响应: {upload_res}")
 
-            key_map = {
-                "image": "imageKey",
-                "video": "videoKey",
-                "file": "fileKey"
-            }
-            key_name = key_map.get(field_name)
+                if upload_res.get("code") != 1:
+                    error_msg = upload_res.get("msg", "未知错误")
+                    raise ValueError(f"文件上传失败: {error_msg}")
+
+                key_map = {
+                    "image": "imageKey",
+                    "video": "videoKey",
+                    "file": "fileKey"
+                }
+                if "data" not in upload_res or key_map.get(field_name) not in upload_res["data"]:
+                    raise ValueError("上传API返回的数据格式不正确")
+
+                key_name = key_map.get(field_name)
 
             payload = {
                 "recvId": self._target_id,
