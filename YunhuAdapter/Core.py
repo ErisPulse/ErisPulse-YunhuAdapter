@@ -22,16 +22,28 @@ class YunhuAdapter(sdk.BaseAdapter):
                 except Exception:
                     raise ValueError("text 必须可转换为字符串")
 
-            return asyncio.create_task(
-                self._adapter.call_api(
-                    endpoint="/bot/send",
-                    recvId=self._target_id,
-                    recvType=self._target_type,
-                    contentType="text",
-                    content={"text": text, "buttons": buttons},
-                    parentId=parent_id
+            if isinstance(self._target_id, list):
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/batch_send",
+                        recvIds=self._target_id,
+                        recvType=self._target_type,
+                        contentType="text",
+                        content={"text": text, "buttons": buttons},
+                        parentId=parent_id
+                    )
                 )
-            )
+            else:
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/send",
+                        recvId=self._target_id,
+                        recvType=self._target_type,
+                        contentType="text",
+                        content={"text": text, "buttons": buttons},
+                        parentId=parent_id
+                    )
+                )
 
         def Html(self, html: str, buttons: List = None, parent_id: str = ""):
             if not isinstance(html, str):
@@ -40,16 +52,28 @@ class YunhuAdapter(sdk.BaseAdapter):
                 except Exception:
                     raise ValueError("html 必须可转换为字符串")
 
-            return asyncio.create_task(
-                self._adapter.call_api(
-                    endpoint="/bot/send",
-                    recvId=self._target_id,
-                    recvType=self._target_type,
-                    contentType="html",
-                    content={"text": html, "buttons": buttons},
-                    parentId=parent_id
+            if isinstance(self._target_id, list):
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/batch_send",
+                        recvIds=self._target_id,
+                        recvType=self._target_type,
+                        contentType="html",
+                        content={"text": html, "buttons": buttons},
+                        parentId=parent_id
+                    )
                 )
-            )
+            else:
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/send",
+                        recvId=self._target_id,
+                        recvType=self._target_type,
+                        contentType="html",
+                        content={"text": html, "buttons": buttons},
+                        parentId=parent_id
+                    )
+                )
 
         def Markdown(self, markdown: str, buttons: List = None, parent_id: str = ""):
             if not isinstance(markdown, str):
@@ -58,15 +82,28 @@ class YunhuAdapter(sdk.BaseAdapter):
                 except Exception:
                     raise ValueError("markdown 必须可转换为字符串")
 
-            return asyncio.create_task(
-                self._adapter.call_api(
-                    endpoint="/bot/send",
-                    recvId=self._target_id,
-                    recvType=self._target_type,
-                    contentType="markdown",
-                    content={"text": markdown, "buttons": buttons},
+            if isinstance(self._target_id, list):
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/batch_send",
+                        recvIds=self._target_id,
+                        recvType=self._target_type,
+                        contentType="markdown",
+                        content={"text": markdown, "buttons": buttons},
+                        parentId=parent_id
+                    )
                 )
-            )
+            else:
+                return asyncio.create_task(
+                    self._adapter.call_api(
+                        endpoint="/bot/send",
+                        recvId=self._target_id,
+                        recvType=self._target_type,
+                        contentType="markdown",
+                        content={"text": markdown, "buttons": buttons},
+                        parentId=parent_id
+                    )
+                )
 
         def Image(self, file: bytes, buttons: List = None, parent_id: str = ""):
             return asyncio.create_task(
@@ -108,6 +145,10 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
         def Batch(self, target_ids: List[str], message: Any, content_type: str = "text", **kwargs):
+            if content_type in ["text", "html", "markdown"]:
+                self.logger.debug("批量发送文本/富文本消息时, 更推荐的方法是使用" \
+                " Send.To('user'/'group', user_ids: list/group_ids: list).Text/Html/Markdown(message, buttons = None, parent_id = None)")
+                
             if not isinstance(message, str):
                 try:
                     message = str(message)
@@ -159,11 +200,11 @@ class YunhuAdapter(sdk.BaseAdapter):
                 return asyncio.create_task(
                     self._adapter.call_api(
                         endpoint="/bot/board",
-                        chatId=kwargs["chat_id"],
-                        chatType=kwargs["chat_type"],
+                        chatId=self._target_id,
+                        chatType=self._target_type,
                         contentType=kwargs.get("content_type", "text"),
-                        content={"text": content},
-                        memberId=kwargs.get("member_id", ""),
+                        content=content,
+                        memberId=kwargs.get("member_id", None),
                         expireTime=kwargs.get("expire_time", 0)
                     )
                 )
@@ -172,7 +213,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     self._adapter.call_api(
                         endpoint="/bot/board-all",
                         contentType=kwargs.get("content_type", "text"),
-                        content={"text": content},
+                        content=content,
                         expireTime=kwargs.get("expire_time", 0)
                     )
                 )
@@ -396,7 +437,7 @@ sdk.env.set("YunhuAdapter", {
             event_type = data["header"]["eventType"]
             mapped_type = self.event_map.get(event_type, "unknown")
 
-            self.logger.debug(f"[SSE] 事件 {event_type} -> {mapped_type}")
+            self.logger.debug(f"事件 {event_type} -> {mapped_type}")
             await self.emit(mapped_type, data)
 
         except Exception as e:
