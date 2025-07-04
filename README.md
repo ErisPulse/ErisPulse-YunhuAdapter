@@ -118,13 +118,25 @@ with open("image.png", "rb") as f:
     image_data = f.read()
 await yunhu.Send.To("user", "user123").Image(image_data)
 
+# 发送视频（需先读取为 bytes）
+with open("video.mp4", "rb") as f:
+    video_data = f.read()
+await yunhu.Send.To("group", "group456").Video(video_data)
+
+# 发送文件（需先读取为 bytes）
+with open("file.txt", "rb") as f:
+    file_data = f.read()
+await yunhu.Send.To("group", "group456").File(file_data)
+
 # 发送富文本 (HTML)
 await yunhu.Send.To("group", "group456").Html("<b>加粗</b>消息")
 
 # 发送 Markdown 格式消息
 await yunhu.Send.To("user", "user123").Markdown("# 标题\n- 列表项")
 
-# 批量发送消息
+# 批量发送消息 （过时的）
+# 该方法批量发送文本/富文本消息时, 更推荐的方法是使用: 
+#   Send.To('user'/'group', user_ids: list/group_ids: list).Text/Html/Markdown(message, buttons = None, parent_id = None)
 await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
 
 # 编辑已有消息
@@ -132,8 +144,16 @@ await yunhu.Send.To("user", "user123").Edit("msg_abc123", "修改后的内容")
 
 # 撤回消息
 await yunhu.Send.To("group", "group456").Recall("msg_abc123")
-```
 
+# 流式消息传输
+async def stream_generator():
+    for i in range(5):
+        yield f"这是第 {i+1} 段内容\n".encode("utf-8")
+        await asyncio.sleep(1)
+
+await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
+```
+> Text/Html/Markdown 的发送支持使用list传入多个id进行批量发送 | 而不再推荐使用 await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
 ---
 
 ### 配置说明
@@ -164,32 +184,12 @@ sdk.env.set("YunhuAdapter", {
 await yunhu.Send.To("user", "user123").Board("global", "重要公告", expire_time=86400)
 
 # 发布群组公告
-await yunhu.Send.To("user", "user123").Board("local", "群公告", chat_id="group123", chat_type="group")
+await yunhu.Send.To("user", "user123").Board("local", "指定用户看板")
 
 # 撤销公告
-await yunhu.Send.To("user", "user123").DismissBoard("local", chat_id="group123", chat_type="group")
+await yunhu.Send.To("user", "user123").DismissBoard("local" / "global")
 ```
 
----
-
-### 流式消息传输支持
-
-云湖适配器支持通过 **分块传输编码（Chunked Transfer Encoding）** 技术实现流式消息发送，适用于需要逐步生成或实时传输大量内容的场景。
-
-#### 使用方式：
-
-通过新增的 send_stream 方法进行调用，需传入一个异步生成器作为内容源。
-
-```python
-async def stream_generator():
-    for i in range(5):
-        yield f"这是第 {i+1} 段内容\n".encode("utf-8")
-        await asyncio.sleep(1)
-
-await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
-```
-
----
 
 ### 注意事项：
 
