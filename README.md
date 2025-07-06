@@ -190,6 +190,28 @@ await yunhu.Send.To("user", "user123").Board("local", "指定用户看板")
 await yunhu.Send.To("user", "user123").DismissBoard("local" / "global")
 ```
 
+## 新特性
+
+> 2.6.0
+### File/Image/Video 已支持流式上传模式
+```python
+async def generate_file():
+    with open('large_file.mp4', 'rb') as f:
+        while chunk := f.read(1024*1024):
+            yield chunk
+            await asyncio.sleep(0.1)
+
+await yunhu.Send.Video(generate_file(), stream=True)
+```
+
+### 参数说明
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| file | bytes/AsyncGenerator | 文件内容或异步生成器 |
+| stream | bool | 是否使用流式模式(默认False) |
+| buttons | List | 按钮列表(可选) |
+| parent_id | str | 父消息ID(可选) |
+
 
 ### 注意事项：
 

@@ -105,7 +105,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     )
                 )
 
-        def Image(self, file: bytes, buttons: List = None, parent_id: str = ""):
+        def Image(self, file, buttons: List = None, parent_id: str = "", stream: bool = False):
             return asyncio.create_task(
                 self._upload_file_and_call_api(
                     "/image/upload",
@@ -114,11 +114,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                     endpoint="/bot/send",
                     content_type="image",
                     buttons=buttons,
-                    parent_id=parent_id
+                    parent_id=parent_id,
+                    stream=stream
                 )
             )
 
-        def Video(self, file: bytes, buttons: List = None, parent_id: str = ""):
+        def Video(self, file, buttons: List = None, parent_id: str = "", stream: bool = False):
             return asyncio.create_task(
                 self._upload_file_and_call_api(
                     "/video/upload",
@@ -127,11 +128,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                     endpoint="/bot/send",
                     content_type="video",
                     buttons=buttons,
-                    parent_id=parent_id
+                    parent_id=parent_id,
+                    stream=stream
                 )
             )
 
-        def File(self, file: bytes, buttons: List = None, parent_id: str = ""):
+        def File(self, file, buttons: List = None, parent_id: str = "", stream: bool = False):
             return asyncio.create_task(
                 self._upload_file_and_call_api(
                     "/file/upload",
@@ -140,7 +142,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                     endpoint="/bot/send",
                     content_type="file",
                     buttons=buttons,
-                    parent_id=parent_id
+                    parent_id=parent_id,
+                    stream=stream
                 )
             )
 
@@ -266,28 +269,53 @@ class YunhuAdapter(sdk.BaseAdapter):
             url = f"{self._adapter.base_url}{upload_endpoint}?token={self._adapter.yhToken}"
             data = aiohttp.FormData()
             
-            try:
-                file_info = filetype.guess(file)
-                if file_info:
-                    filename = f"file.{file_info.extension}"
-                    mime_type = file_info.mime
-                else:
-                    filename = f"file.{field_name}"
-                    mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+            if kwargs.get('stream', False):
+                if not hasattr(file, '__aiter__'):
+                    raise ValueError("stream=True时，file参数必须是异步生成器")
+                
+                temp_file = io.BytesIO()
+                async for chunk in file:
+                    temp_file.write(chunk)
+                
+                # 重置指针
+                temp_file.seek(0)
+                
+                # 类型
+                file_info = filetype.guess(temp_file.read(1024))  # 前1KB用于类型检测
+                temp_file.seek(0)
+                
+                filename = f"file.{file_info.extension}" if file_info else f"file.{field_name}"
+                mime_type = file_info.mime if file_info else mimetypes.guess_type(filename)[0] or "application/octet-stream"
                 
                 data.add_field(
                     name=field_name,
-                    value=io.BufferedReader(io.BytesIO(file)),
+                    value=temp_file,
                     filename=filename,
                     content_type=mime_type
                 )
-            except Exception as e:
-                self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
-                data.add_field(
-                    name=field_name,
-                    value=file,
-                    filename=f"file.{field_name}",
-                )
+            else:
+                try:
+                    file_info = filetype.guess(file)
+                    if file_info:
+                        filename = f"file.{file_info.extension}"
+                        mime_type = file_info.mime
+                    else:
+                        filename = f"file.{field_name}"
+                        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+                    
+                    data.add_field(
+                        name=field_name,
+                        value=io.BufferedReader(io.BytesIO(file)),
+                        filename=filename,
+                        content_type=mime_type
+                    )
+                except Exception as e:
+                    self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
+                    data.add_field(
+                        name=field_name,
+                        value=file,
+                        filename=f"file.{field_name}",
+                    )
 
             async with self._adapter.session.post(url, data=data) as response:
                 upload_res = await response.json()
