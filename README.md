@@ -209,7 +209,6 @@ await yunhu.Send.Video(generate_file(), stream=True)
 |------|------|------|
 | file | bytes/AsyncGenerator | 文件内容或异步生成器 |
 | stream | bool | 是否使用流式模式(默认False) |
-| buttons | List | 按钮列表(可选) |
 | parent_id | str | 父消息ID(可选) |
 
 
