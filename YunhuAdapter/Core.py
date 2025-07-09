@@ -1,5 +1,7 @@
 import asyncio
 import aiohttp
+import uuid
+import time
 import io
 from urllib.parse import quote
 import json
@@ -465,13 +467,230 @@ sdk.env.set("YunhuAdapter", {
 
     async def _handle_webhook(self, request: web.Request) -> web.Response:
         try:
+            # 添加原始数据日志
+            raw_data = await request.text()
+            self.logger.debug(f"收到原始WebHook数据: {raw_data}")
+            
             data = await request.json()
+            self.logger.debug(f"解析后的WebHook数据: {json.dumps(data, indent=2)}")
+            
             await self._process_webhook_event(data)
             return web.Response(text="OK", status=200)
         except Exception as e:
-            self.logger.error(f"Webhook处理错误: {str(e)}")
+            self.logger.error(f"Webhook处理错误: {str(e)}", exc_info=True)
             return web.Response(text=f"ERROR: {str(e)}", status=500)
-
+    async def _convert_to_onebot12(self, event_type: str, data: Dict) -> Optional[Dict]:
+        """
+        将云湖协议事件转换为OneBot12标准协议
+        
+        Args:
+            event_type: 云湖事件类型 (message, command, follow, unfollow, group_join, group_leave, button_click, shortcut_menu)
+            data: 原始云湖事件数据
+            
+        Returns:
+            OneBot12标准格式的事件字典，如果不支持转换则返回None
+        """
+        header = data.get("header", {})
+        event_data = data.get("event", {})
+        
+        # 基础事件结构
+        onebot_event = {
+            "id": header.get("eventId", str(uuid.uuid4())),
+            "time": int(header.get("eventTime", time.time() * 1000) / 1000),
+            "type": "",
+            "detail_type": "",
+            "sub_type": "",
+            "platform": "yunhu",
+            "self": {
+                "platform": "yunhu",
+                "user_id": ""  # 需要从具体事件中获取机器人ID
+            }
+        }
+        
+        # 根据不同类型进行转换
+        if event_type in ["message", "command"]:
+            message_event = event_data.get("message", {})
+            sender = event_data.get("sender", {})
+            chat_info = event_data.get("chat", {})
+            content_type = message_event.get("contentType", "text")
+            content = message_event.get("content", {})
+            
+            # 构造消息段
+            message_segments = []
+            
+            # 处理不同内容类型
+            if content_type == "text":
+                message_segments.append({
+                    "type": "text",
+                    "data": {"text": content.get("text", "")}
+                })
+            elif content_type == "image":
+                # 处理图片消息
+                image_data = {
+                    "file_id": content.get("imageUrl", ""),
+                    "url": content.get("imageUrl", ""),
+                    "file_name": content.get("imageName", ""),
+                    "size": None,  # 云湖协议中没有提供图片大小
+                    "width": content.get("imageWidth", 0),
+                    "height": content.get("imageHeight", 0)
+                }
+                message_segments.append({
+                    "type": "image",
+                    "data": image_data
+                })
+            elif content_type == "video":
+                # 处理视频消息
+                video_data = {
+                    "file_id": content.get("videoUrl", ""),
+                    "url": content.get("videoUrl", ""),
+                    "file_name": content.get("videoUrl", "").split("/")[-1],
+                    "size": None,  # 云湖协议中没有提供视频大小
+                    "duration": content.get("videoDuration", 0)
+                }
+                message_segments.append({
+                    "type": "video",
+                    "data": video_data
+                })
+            elif content_type == "file":
+                # 处理文件消息
+                file_data = {
+                    "file_id": content.get("fileUrl", ""),  # 使用URL作为临时file_id
+                    "url": content.get("fileUrl", ""),
+                    "file_name": content.get("fileName", ""),
+                    "size": content.get("fileSize", 0)
+                }
+                message_segments.append({
+                    "type": "file",
+                    "data": file_data
+                })
+            elif content_type == "form":
+                # 处理表单类型消息（保持不变）
+                form_json = content.get("formJson", {})
+                form_data = []
+                for field_id, field_data in form_json.items():
+                    field_type = field_data.get("type", "")
+                    field_value = ""
+                    
+                    if field_type == "input":
+                        field_value = field_data.get("value", "")
+                    elif field_type == "switch":
+                        field_value = str(field_data.get("value", False))
+                    elif field_type == "checkbox":
+                        selected = field_data.get("selectStatus", [])
+                        values = field_data.get("selectValues", [])
+                        field_value = ",".join([v for i, v in enumerate(values) if i < len(selected) and selected[i]])
+                    elif field_type == "textarea":
+                        field_value = field_data.get("value", "")
+                    elif field_type == "select":
+                        field_value = field_data.get("selectValue", "")
+                    elif field_type == "radio":
+                        field_value = field_data.get("selectValue", "")
+                    
+                    form_data.append({
+                        "id": field_id,
+                        "type": field_type,
+                        "label": field_data.get("label", ""),
+                        "value": field_value
+                    })
+                
+                message_segments.append({
+                    "type": "form",
+                    "data": {
+                        "id": message_event.get("instructionId", ""),
+                        "name": message_event.get("instructionName", ""),
+                        "fields": form_data
+                    }
+                })
+            
+            # 添加按钮信息
+            if content.get("buttons"):
+                message_segments.append({
+                    "type": "button",
+                    "data": {"buttons": content["buttons"]}
+                })
+            
+            # 构造基础消息事件
+            onebot_event.update({
+                "type": "message",
+                "detail_type": "private" if chat_info.get("chatType") == "bot" else "group",
+                "sub_type": "command" if event_type == "command" else "",
+                "message_id": message_event.get("msgId", ""),
+                "message": message_segments,
+                "alt_message": content.get("text", ""),
+                "user_id": sender.get("senderId", ""),
+                "group_id": chat_info.get("chatId", "") if chat_info.get("chatType") == "group" else "",
+                "self": {
+                    "platform": "yunhu",
+                    "user_id": chat_info.get("chatId", "") if chat_info.get("chatType") == "bot" else ""
+                }
+            })
+            
+            # 添加指令信息
+            if event_type == "command":
+                onebot_event["command"] = {
+                    "name": message_event.get("commandName", ""),
+                    "id": str(message_event.get("commandId", 0)),
+                    "args": content.get("text", "").replace(f"/{message_event.get('commandName', '')}", "").strip()
+                }
+                
+                # 如果是表单类型指令，添加表单数据
+                if content_type == "form":
+                    onebot_event["command"]["form"] = content.get("formJson", {})
+            
+        elif event_type in ["follow", "unfollow"]:
+            onebot_event.update({
+                "type": "notice",
+                "detail_type": "friend_" + ("increase" if event_type == "follow" else "decrease"),
+                "user_id": event_data.get("userId", ""),
+                "self": {
+                    "platform": "yunhu",
+                    "user_id": event_data.get("chatId", "")
+                }
+            })
+            
+        elif event_type in ["group_join", "group_leave"]:
+            onebot_event.update({
+                "type": "notice",
+                "detail_type": "group_member_" + ("increase" if event_type == "group_join" else "decrease"),
+                "sub_type": "invite" if event_type == "group_join" else "leave",
+                "group_id": event_data.get("chatId", ""),
+                "user_id": event_data.get("userId", ""),
+                "operator_id": "",
+                "self": {
+                    "platform": "yunhu",
+                    "user_id": ""
+                }
+            })
+            
+        elif event_type == "button_click":
+            onebot_event.update({
+                "type": "notice",
+                "detail_type": "button_click",
+                "user_id": event_data.get("userId", ""),
+                "message_id": event_data.get("msgId", ""),
+                "button": {
+                    "id": "",  # 云湖协议中没有提供按钮ID
+                    "value": event_data.get("value", "")
+                }
+            })
+            
+        elif event_type == "shortcut_menu":
+            onebot_event.update({
+                "type": "notice",
+                "detail_type": "shortcut_menu",
+                "user_id": event_data.get("senderId", ""),
+                "menu": {
+                    "id": event_data.get("menuId", ""),
+                    "type": event_data.get("menuType", 1),
+                    "action": event_data.get("menuAction", 1)
+                }
+            })
+            
+        else:
+            # 不支持的云湖事件类型
+            return None
+            
+        return onebot_event
     async def _process_webhook_event(self, data: Dict):
         try:
             if not isinstance(data, dict):
@@ -484,7 +703,13 @@ sdk.env.set("YunhuAdapter", {
             mapped_type = self.event_map.get(event_type, "unknown")
 
             self.logger.debug(f"事件 {event_type} -> {mapped_type}")
+            
             await self.emit(mapped_type, data)
+            
+            if hasattr(self, "emit_onebot12"):
+                onebot_event = await self._convert_to_onebot12(mapped_type, data)
+                if onebot_event:
+                    await self.emit_onebot12(onebot_event.get("type", "unknown"), onebot_event)
 
         except Exception as e:
             self.logger.error(f"处理事件错误: {str(e)}")
@@ -594,7 +819,7 @@ sdk.env.set("YunhuAdapter", {
             server_config.get("port", 8080)
         )
         await site.start()
-        self.logger.info(f"Webhook服务器已启动: {site.name}")
+        self.logger.info(f"Webhook服务器已启动: {site.name}{server_config.get('path')}")
 
     async def stop_server(self):
         if self.server:
