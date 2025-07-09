@@ -184,8 +184,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     recvId=self._target_id,
                     recvType=self._target_type,
                     contentType=content_type,
-                    content={"text": text},
-                    buttons=buttons if buttons is not None else []
+                    content={"text": text, "buttons": buttons if buttons is not None else []},
                 )
             )
 
