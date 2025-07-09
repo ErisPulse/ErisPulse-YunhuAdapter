@@ -480,16 +480,6 @@ sdk.env.set("YunhuAdapter", {
             self.logger.error(f"Webhook处理错误: {str(e)}", exc_info=True)
             return web.Response(text=f"ERROR: {str(e)}", status=500)
     async def _convert_to_onebot12(self, event_type: str, data: Dict) -> Optional[Dict]:
-        """
-        将云湖协议事件转换为OneBot12标准协议
-        
-        Args:
-            event_type: 云湖事件类型 (message, command, follow, unfollow, group_join, group_leave, button_click, shortcut_menu)
-            data: 原始云湖事件数据
-            
-        Returns:
-            OneBot12标准格式的事件字典，如果不支持转换则返回None
-        """
         header = data.get("header", {})
         event_data = data.get("event", {})
         
@@ -503,11 +493,10 @@ sdk.env.set("YunhuAdapter", {
             "platform": "yunhu",
             "self": {
                 "platform": "yunhu",
-                "user_id": ""  # 需要从具体事件中获取机器人ID
+                "user_id": ""
             }
         }
         
-        # 根据不同类型进行转换
         if event_type in ["message", "command"]:
             message_event = event_data.get("message", {})
             sender = event_data.get("sender", {})
@@ -515,22 +504,19 @@ sdk.env.set("YunhuAdapter", {
             content_type = message_event.get("contentType", "text")
             content = message_event.get("content", {})
             
-            # 构造消息段
             message_segments = []
             
-            # 处理不同内容类型
             if content_type == "text":
                 message_segments.append({
                     "type": "text",
                     "data": {"text": content.get("text", "")}
                 })
             elif content_type == "image":
-                # 处理图片消息
                 image_data = {
                     "file_id": content.get("imageUrl", ""),
                     "url": content.get("imageUrl", ""),
                     "file_name": content.get("imageName", ""),
-                    "size": None,  # 云湖协议中没有提供图片大小
+                    "size": None,
                     "width": content.get("imageWidth", 0),
                     "height": content.get("imageHeight", 0)
                 }
@@ -539,12 +525,11 @@ sdk.env.set("YunhuAdapter", {
                     "data": image_data
                 })
             elif content_type == "video":
-                # 处理视频消息
                 video_data = {
                     "file_id": content.get("videoUrl", ""),
                     "url": content.get("videoUrl", ""),
                     "file_name": content.get("videoUrl", "").split("/")[-1],
-                    "size": None,  # 云湖协议中没有提供视频大小
+                    "size": None,
                     "duration": content.get("videoDuration", 0)
                 }
                 message_segments.append({
@@ -552,9 +537,8 @@ sdk.env.set("YunhuAdapter", {
                     "data": video_data
                 })
             elif content_type == "file":
-                # 处理文件消息
                 file_data = {
-                    "file_id": content.get("fileUrl", ""),  # 使用URL作为临时file_id
+                    "file_id": content.get("fileUrl", ""),
                     "url": content.get("fileUrl", ""),
                     "file_name": content.get("fileName", ""),
                     "size": content.get("fileSize", 0)
@@ -564,7 +548,6 @@ sdk.env.set("YunhuAdapter", {
                     "data": file_data
                 })
             elif content_type == "form":
-                # 处理表单类型消息（保持不变）
                 form_json = content.get("formJson", {})
                 form_data = []
                 for field_id, field_data in form_json.items():
@@ -602,14 +585,12 @@ sdk.env.set("YunhuAdapter", {
                     }
                 })
             
-            # 添加按钮信息
             if content.get("buttons"):
                 message_segments.append({
                     "type": "button",
                     "data": {"buttons": content["buttons"]}
                 })
             
-            # 构造基础消息事件
             onebot_event.update({
                 "type": "message",
                 "detail_type": "private" if chat_info.get("chatType") == "bot" else "group",
@@ -633,7 +614,7 @@ sdk.env.set("YunhuAdapter", {
                     "args": content.get("text", "").replace(f"/{message_event.get('commandName', '')}", "").strip()
                 }
                 
-                # 如果是表单类型指令，添加表单数据
+                # 表单类型指令
                 if content_type == "form":
                     onebot_event["command"]["form"] = content.get("formJson", {})
             
@@ -669,7 +650,7 @@ sdk.env.set("YunhuAdapter", {
                 "user_id": event_data.get("userId", ""),
                 "message_id": event_data.get("msgId", ""),
                 "button": {
-                    "id": "",  # 云湖协议中没有提供按钮ID
+                    "id": "",
                     "value": event_data.get("value", "")
                 }
             })
@@ -687,7 +668,7 @@ sdk.env.set("YunhuAdapter", {
             })
             
         else:
-            # 不支持的云湖事件类型
+            # 不支持的事件类型
             return None
             
         return onebot_event

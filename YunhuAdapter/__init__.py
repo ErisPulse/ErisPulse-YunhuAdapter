@@ -3,7 +3,7 @@ moduleInfo = {
         "name": "YunhuAdapter",
         "version": "2.8.0",
         "description": "云湖协议适配器，整合所有云湖功能模块",
-        "author": "r1a, WSu2059",
+        "author": "wsu2059q",
         "license": "MIT",
         "homepage": "https://github.com/ErisPulse/ErisPulse-YunhuAdapter"
     },
@@ -27,3 +27,5 @@ adapterInfo = {
 }
 
 # build_hash="d324b58a7844f9b44d8757d182fe68825a649678192aa37f60664350c6670809"
+
+# build_hash="ea2009bceef0a20c83aa3512aafb83d6f18619c8bdd8864c0887f19600d71c67"
