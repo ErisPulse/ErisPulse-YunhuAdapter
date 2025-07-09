@@ -1,7 +1,7 @@
 moduleInfo = {
     "meta": {
         "name": "YunhuAdapter",
-        "version": "2.6.1",
+        "version": "2.7.0",
         "description": "云湖协议适配器，整合所有云湖功能模块",
         "author": "r1a, WSu2059",
         "license": "MIT",
@@ -33,3 +33,5 @@ adapterInfo = {
 # build_hash="edcf249e8530d016b573df6e985c41b8ef24458563b4723b1bacc646c27719de"
 
 # build_hash="8d005728c11ce5e01a5df77ff02a8b2a878c1dd4211e7b81366156a926d77de7"
+
+# build_hash="0d436ea2c5dfb0ab9b6bbb3123a1a9de00ae7dbd7006f00df874d2b9346ea20c"
