@@ -74,8 +74,8 @@ async def test_uploads():
             async def file_stream():
                 with open(file_path, "rb") as f:
                     while chunk := f.read(512 * 1024):
+                        await asyncio.sleep(0.1)
                         yield chunk
-                        await asyncio.sleep(0.01)
 
             display_name = f"流式上传_{display_name}"
 
