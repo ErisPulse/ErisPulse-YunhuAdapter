@@ -140,6 +140,8 @@ await yunhu.Send.To("user", "user123").Markdown("# 标题\n- 列表项")
 await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
 
 # 编辑已有消息
+# 可以在编辑时添加按钮
+# Send.To('user'/'group', user_ids: list/group_ids: list).Edit(message_id, message, buttons = None)
 await yunhu.Send.To("user", "user123").Edit("msg_abc123", "修改后的内容")
 
 # 撤回消息

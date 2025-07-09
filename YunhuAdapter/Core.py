@@ -1,8 +1,8 @@
 import asyncio
 import aiohttp
 import io
+from urllib.parse import quote
 import json
-import mimetypes
 from aiohttp import web
 from typing import Dict, List, Optional, Any, AsyncGenerator
 import filetype
@@ -105,11 +105,11 @@ class YunhuAdapter(sdk.BaseAdapter):
                     )
                 )
 
-        def Image(self, file, buttons: List = None, parent_id: str = "", stream: bool = False):
+        def Image(self, file, buttons: List = None, parent_id: str = "", stream: bool = False, filename: str = None):
             return asyncio.create_task(
                 self._upload_file_and_call_api(
                     "/image/upload",
-                    field_name="image",
+                    file_name=filename,
                     file=file,
                     endpoint="/bot/send",
                     content_type="image",
@@ -119,11 +119,11 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        def Video(self, file, buttons: List = None, parent_id: str = "", stream: bool = False):
+        def Video(self, file, buttons: List = None, parent_id: str = "", stream: bool = False, filename: str = None):
             return asyncio.create_task(
                 self._upload_file_and_call_api(
                     "/video/upload",
-                    field_name="video",
+                    file_name=filename,
                     file=file,
                     endpoint="/bot/send",
                     content_type="video",
@@ -133,11 +133,11 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        def File(self, file, buttons: List = None, parent_id: str = "", stream: bool = False):
+        def File(self, file, buttons: List = None, parent_id: str = "", stream: bool = False, filename: str = None):
             return asyncio.create_task(
                 self._upload_file_and_call_api(
                     "/file/upload",
-                    field_name="file",
+                    file_name=filename,
                     file=file,
                     endpoint="/bot/send",
                     content_type="file",
@@ -265,10 +265,23 @@ class YunhuAdapter(sdk.BaseAdapter):
                     return False
                 msg_list = data.get("data", {}).get("list", [])
                 return any(msg["msgId"] == message_id for msg in msg_list)
+        def _detect_document(self, sample_bytes):
+            office_signatures = {
+                b'PK\x03\x04\x14\x00\x06\x00': 'docx',  # DOCX
+                b'PK\x03\x04\x14\x00\x00\x08': 'xlsx',  # XLSX
+                b'PK\x03\x04\x14\x00\x00\x06': 'pptx'   # PPTX
+            }
+            
+            for signature, extension in office_signatures.items():
+                if sample_bytes.startswith(signature):
+                    return extension
+            return None
 
-        async def _upload_file_and_call_api(self, upload_endpoint, field_name, file, endpoint, content_type, **kwargs):
+        async def _upload_file_and_call_api(self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs):
             url = f"{self._adapter.base_url}{upload_endpoint}?token={self._adapter.yhToken}"
-            data = aiohttp.FormData()
+            
+            # 使用不编码字段名的FormData
+            data = aiohttp.FormData(quote_fields=False)
             
             if kwargs.get('stream', False):
                 if not hasattr(file, '__aiter__'):
@@ -277,65 +290,71 @@ class YunhuAdapter(sdk.BaseAdapter):
                 temp_file = io.BytesIO()
                 async for chunk in file:
                     temp_file.write(chunk)
-                
-                # 重置指针
                 temp_file.seek(0)
-                
-                # 类型
-                file_info = filetype.guess(temp_file.read(1024))  # 前1KB用于类型检测
-                temp_file.seek(0)
-                
-                filename = f"file.{file_info.extension}" if file_info else f"file.{field_name}"
-                mime_type = file_info.mime if file_info else mimetypes.guess_type(filename)[0] or "application/octet-stream"
-                
-                data.add_field(
-                    name=field_name,
-                    value=temp_file,
-                    filename=filename,
-                    content_type=mime_type
-                )
+                file_data = temp_file
             else:
-                try:
-                    file_info = filetype.guess(file)
-                    if file_info:
-                        filename = f"file.{file_info.extension}"
-                        mime_type = file_info.mime
-                    else:
-                        filename = f"file.{field_name}"
-                        mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-                    
-                    data.add_field(
-                        name=field_name,
-                        value=io.BufferedReader(io.BytesIO(file)),
-                        filename=filename,
-                        content_type=mime_type
-                    )
-                except Exception as e:
-                    self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
-                    data.add_field(
-                        name=field_name,
-                        value=file,
-                        filename=f"file.{field_name}",
-                    )
+                file_data = io.BytesIO(file) if isinstance(file, bytes) else file
 
+            file_info = None
+            file_extension = None
+            
+            try:
+                if hasattr(file_data, 'seek'):
+                    file_data.seek(0)
+                    sample = file_data.read(1024)
+                    file_data.seek(0)
+                    
+                    file_info = filetype.guess(sample)
+                    
+                    # 让我看看是哪个伪装成 zip 的文档
+                    if file_info and file_info.mime == 'application/zip':
+                        office_extension = self._detect_document(sample)
+                        if office_extension:
+                            file_extension = office_extension
+                    elif file_info:
+                        file_extension = file_info.extension
+            except Exception as e:
+                self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
+
+            # 确定上传文件名
+            if file_name is None:
+                if file_extension:
+                    upload_filename = f"{content_type}.{file_extension}"
+                else:
+                    upload_filename = f"{content_type}.bin"
+            else:
+                if file_extension and '.' not in file_name:
+                    upload_filename = f"{file_name}.{file_extension}"
+                else:
+                    upload_filename = file_name
+
+            sdk.logger.debug(f"上传文件: {upload_filename}")
+            data.add_field(
+                name=content_type,
+                value=file_data,
+                filename=upload_filename,
+            )
+
+            # 上传文件
             async with self._adapter.session.post(url, data=data) as response:
                 upload_res = await response.json()
                 self._adapter.logger.debug(f"上传响应: {upload_res}")
 
                 if upload_res.get("code") != 1:
                     error_msg = upload_res.get("msg", "未知错误")
-                    raise ValueError(f"文件上传失败: {error_msg}")
+                    raise ValueError(f"文件上传失败: {upload_res}")
 
                 key_map = {
                     "image": "imageKey",
                     "video": "videoKey",
                     "file": "fileKey"
                 }
-                if "data" not in upload_res or key_map.get(field_name) not in upload_res["data"]:
+                
+                key_name = key_map.get(content_type, "fileKey")
+                if "data" not in upload_res or key_name not in upload_res["data"]:
                     raise ValueError("上传API返回的数据格式不正确")
 
-                key_name = key_map.get(field_name)
-
+            # 构造API调用负载
             payload = {
                 "recvId": self._target_id,
                 "recvType": self._target_type,
@@ -348,7 +367,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                 payload["content"]["buttons"] = kwargs["buttons"]
 
             return await self._adapter.call_api(endpoint, **payload)
-
     def __init__(self, sdk):
         super().__init__()
         self.sdk = sdk
