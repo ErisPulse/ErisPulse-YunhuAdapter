@@ -170,7 +170,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        def Edit(self, msg_id: str, text: Any, content_type: str = "text"):
+        def Edit(self, msg_id: str, text: Any, content_type: str = "text", buttons: List = None):
             if not isinstance(text, str):
                 try:
                     text = str(text)
@@ -184,7 +184,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                     recvId=self._target_id,
                     recvType=self._target_type,
                     contentType=content_type,
-                    content={"text": text}
+                    content={"text": text},
+                    buttons=buttons if buttons is not None else []
                 )
             )
 
