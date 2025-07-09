@@ -194,8 +194,8 @@ await yunhu.Send.To("user", "user123").DismissBoard("local" / "global")
 
 ## 新特性
 
-> 2.6.0
-### File/Image/Video 已支持流式上传模式
+#### 2.6.0
+##### File/Image/Video 已支持流式上传模式
 ```python
 async def generate_file():
     with open('large_file.mp4', 'rb') as f:
@@ -205,6 +205,12 @@ async def generate_file():
 
 await yunhu.Send.Video(generate_file(), stream=True)
 ```
+#### 2.7.0
+编辑消息支持传入按钮
+上传文件时可以传入文件名（包括流式）
+
+#### 2.8.0
+添加 ErisPulse 2.0.0 对于OneBot12协议对转的兼容
 
 ### 参数说明
 | 参数 | 类型 | 说明 |
