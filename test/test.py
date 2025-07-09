@@ -40,9 +40,9 @@ async def test_edit_add_button():
     sdk.logger.info(f"编辑消息成功: {result}")
 async def test_uploads():
     test_files = [
-        ("test_files/test.docx", "file", "流式-测试文档.docx"),
-        ("test_files/test.jpg", "image", "流式-测试图片.jpg"),
-        ("test_files/test.mp4", "video", "流式-测试视频.mp4")
+        ("test_files/test.docx", "file", "测试文档.docx"),
+        ("test_files/test.jpg", "image", "测试图片.jpg"),
+        ("test_files/test.mp4", "video", "测试视频.mp4")
     ]
     
     Send = sdk.adapter.yunhu.Send.To("group", "635409929")
@@ -52,21 +52,22 @@ async def test_uploads():
             sdk.logger.warning(f"测试文件不存在: {file_path}")
             continue
 
-        # sdk.logger.info(f"开始普通上传: {display_name}")
-        # try:
-        #     with open(file_path, "rb") as f:
-        #         content = f.read()
+        sdk.logger.info(f"开始普通上传: {display_name}")
+        try:
+            with open(file_path, "rb") as f:
+                content = f.read()
+                display_name = f"普通上传_{display_name}"
+
+                if file_type == "file":
+                    result = await Send.File(content, filename=display_name)
+                elif file_type == "image":
+                    result = await Send.Image(content, filename=display_name)
+                elif file_type == "video":
+                    result = await Send.Video(content, filename=display_name)
                 
-        #         if file_type == "file":
-        #             result = await Send.File(content, filename=display_name)
-        #         elif file_type == "image":
-        #             result = await Send.Image(content, filename=display_name)
-        #         elif file_type == "video":
-        #             result = await Send.Video(content, filename=display_name)
-                
-        #         sdk.logger.info(f"普通上传成功: {display_name} - 结果: {result}")
-        # except Exception as e:
-        #     sdk.logger.error(f"普通上传失败: {display_name} - {str(e)}", exc_info=True)
+                sdk.logger.info(f"普通上传成功: {display_name} - 结果: {result}")
+        except Exception as e:
+            sdk.logger.error(f"普通上传失败: {display_name} - {str(e)}", exc_info=True)
             
         sdk.logger.info(f"开始流式上传: {display_name}")
         try:
@@ -75,7 +76,9 @@ async def test_uploads():
                     while chunk := f.read(512 * 1024):
                         yield chunk
                         await asyncio.sleep(0.01)
-            
+
+            display_name = f"流式上传_{display_name}"
+
             if file_type == "file":
                 result = await Send.File(file_stream(), stream=True, filename=display_name)
             elif file_type == "image":
