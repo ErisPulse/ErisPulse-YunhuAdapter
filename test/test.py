@@ -52,24 +52,26 @@ async def test_uploads():
             sdk.logger.warning(f"测试文件不存在: {file_path}")
             continue
 
-        sdk.logger.info(f"开始普通上传: {display_name}")
+        legacy_display_name = f"普通上传_{display_name}"
+        stream_display_name = f"流式上传_{display_name}"
+
+        sdk.logger.info(f"开始普通上传: {legacy_display_name}")
         try:
             with open(file_path, "rb") as f:
                 content = f.read()
-                display_name = f"普通上传_{display_name}"
 
                 if file_type == "file":
-                    result = await Send.File(content, filename=display_name)
+                    result = await Send.File(content, filename=legacy_display_name)
                 elif file_type == "image":
-                    result = await Send.Image(content, filename=display_name)
+                    result = await Send.Image(content, filename=legacy_display_name)
                 elif file_type == "video":
-                    result = await Send.Video(content, filename=display_name)
+                    result = await Send.Video(content, filename=legacy_display_name)
                 
-                sdk.logger.info(f"普通上传成功: {display_name} - 结果: {result}")
+                sdk.logger.info(f"普通上传成功: {legacy_display_name} - 结果: {result}")
         except Exception as e:
-            sdk.logger.error(f"普通上传失败: {display_name} - {str(e)}", exc_info=True)
+            sdk.logger.error(f"普通上传失败: {legacy_display_name} - {str(e)}", exc_info=True)
             
-        sdk.logger.info(f"开始流式上传: {display_name}")
+        sdk.logger.info(f"开始流式上传: {stream_display_name}")
         try:
             async def file_stream():
                 with open(file_path, "rb") as f:
@@ -77,18 +79,16 @@ async def test_uploads():
                         yield chunk
                         await asyncio.sleep(0.05)
 
-            display_name = f"流式上传_{display_name}"
-
             if file_type == "file":
-                result = await Send.File(file_stream(), stream=True, filename=display_name)
+                result = await Send.File(file_stream(), stream=True, filename=stream_display_name)
             elif file_type == "image":
-                result = await Send.Image(file_stream(), stream=True, filename=display_name)
+                result = await Send.Image(file_stream(), stream=True, filename=stream_display_name)
             elif file_type == "video":
-                result = await Send.Video(file_stream(), stream=True, filename=display_name)
+                result = await Send.Video(file_stream(), stream=True, filename=stream_display_name)
             
-            sdk.logger.info(f"流式上传成功: {display_name} - 结果: {result}")
+            sdk.logger.info(f"流式上传成功: {stream_display_name} - 结果: {result}")
         except Exception as e:
-            sdk.logger.error(f"流式上传失败: {display_name} - {str(e)}", exc_info=True)
+            sdk.logger.error(f"流式上传失败: {stream_display_name} - {str(e)}", exc_info=True)
 
 async def main():
     try:
@@ -96,7 +96,7 @@ async def main():
         await sdk.adapter.startup()
         await asyncio.sleep(1)
 
-        await test_edit_add_button()
+        # await test_edit_add_button()
 
         await test_uploads()
         
