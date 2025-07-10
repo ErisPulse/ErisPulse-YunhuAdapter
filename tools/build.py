@@ -15,6 +15,7 @@ config = {
     "files_to_include": [                              # 需要包含的文件列表
         "YunhuAdapter/__init__.py",
         "YunhuAdapter/Core.py",
+        "YunhuAdapter/Converter.py",
         "README.md"
     ]
 }
