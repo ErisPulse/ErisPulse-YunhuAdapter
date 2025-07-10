@@ -9,6 +9,7 @@ from aiohttp import web
 from typing import Dict, List, Optional, Any, AsyncGenerator
 import filetype
 from ErisPulse import sdk
+from .Converter import Converter
 
 class Main:
     def __init__(self, sdk):
@@ -479,199 +480,12 @@ sdk.env.set("YunhuAdapter", {
         except Exception as e:
             self.logger.error(f"Webhook处理错误: {str(e)}", exc_info=True)
             return web.Response(text=f"ERROR: {str(e)}", status=500)
-    async def _convert_to_onebot12(self, event_type: str, data: Dict) -> Optional[Dict]:
+    async def _convert_to_onebot12(self, data: Dict) -> Optional[Dict]:
         header = data.get("header", {})
         event_data = data.get("event", {})
-        
-        # 基础事件结构
-        onebot_event = {
-            "id": header.get("eventId", str(uuid.uuid4())),
-            "time": int(header.get("eventTime", time.time() * 1000) / 1000),
-            "type": "",
-            "detail_type": "",
-            "sub_type": "",
-            "platform": "yunhu",
-            "self": {
-                "platform": "yunhu",
-                "user_id": ""
-            }
-        }
-        
-        if event_type in ["message", "command"]:
-            message_event = event_data.get("message", {})
-            sender = event_data.get("sender", {})
-            chat_info = event_data.get("chat", {})
-            content_type = message_event.get("contentType", "text")
-            content = message_event.get("content", {})
-            
-            message_segments = []
-            
-            if content_type == "text":
-                message_segments.append({
-                    "type": "text",
-                    "data": {"text": content.get("text", "")}
-                })
-            elif content_type == "image":
-                image_data = {
-                    "file_id": content.get("imageUrl", ""),
-                    "url": content.get("imageUrl", ""),
-                    "file_name": content.get("imageName", ""),
-                    "size": None,
-                    "width": content.get("imageWidth", 0),
-                    "height": content.get("imageHeight", 0)
-                }
-                message_segments.append({
-                    "type": "image",
-                    "data": image_data
-                })
-            elif content_type == "video":
-                video_data = {
-                    "file_id": content.get("videoUrl", ""),
-                    "url": content.get("videoUrl", ""),
-                    "file_name": content.get("videoUrl", "").split("/")[-1],
-                    "size": None,
-                    "duration": content.get("videoDuration", 0)
-                }
-                message_segments.append({
-                    "type": "video",
-                    "data": video_data
-                })
-            elif content_type == "file":
-                file_data = {
-                    "file_id": content.get("fileUrl", ""),
-                    "url": content.get("fileUrl", ""),
-                    "file_name": content.get("fileName", ""),
-                    "size": content.get("fileSize", 0)
-                }
-                message_segments.append({
-                    "type": "file",
-                    "data": file_data
-                })
-            elif content_type == "form":
-                form_json = content.get("formJson", {})
-                form_data = []
-                for field_id, field_data in form_json.items():
-                    field_type = field_data.get("type", "")
-                    field_value = ""
-                    
-                    if field_type == "input":
-                        field_value = field_data.get("value", "")
-                    elif field_type == "switch":
-                        field_value = str(field_data.get("value", False))
-                    elif field_type == "checkbox":
-                        selected = field_data.get("selectStatus", [])
-                        values = field_data.get("selectValues", [])
-                        field_value = ",".join([v for i, v in enumerate(values) if i < len(selected) and selected[i]])
-                    elif field_type == "textarea":
-                        field_value = field_data.get("value", "")
-                    elif field_type == "select":
-                        field_value = field_data.get("selectValue", "")
-                    elif field_type == "radio":
-                        field_value = field_data.get("selectValue", "")
-                    
-                    form_data.append({
-                        "id": field_id,
-                        "type": field_type,
-                        "label": field_data.get("label", ""),
-                        "value": field_value
-                    })
-                
-                message_segments.append({
-                    "type": "form",
-                    "data": {
-                        "id": message_event.get("instructionId", ""),
-                        "name": message_event.get("instructionName", ""),
-                        "fields": form_data
-                    }
-                })
-            
-            if content.get("buttons"):
-                message_segments.append({
-                    "type": "button",
-                    "data": {"buttons": content["buttons"]}
-                })
-            
-            onebot_event.update({
-                "type": "message",
-                "detail_type": "private" if chat_info.get("chatType") == "bot" else "group",
-                "sub_type": "command" if event_type == "command" else "",
-                "message_id": message_event.get("msgId", ""),
-                "message": message_segments,
-                "alt_message": content.get("text", ""),
-                "user_id": sender.get("senderId", ""),
-                "group_id": chat_info.get("chatId", "") if chat_info.get("chatType") == "group" else "",
-                "self": {
-                    "platform": "yunhu",
-                    "user_id": chat_info.get("chatId", "") if chat_info.get("chatType") == "bot" else ""
-                }
-            })
-            
-            # 添加指令信息
-            if event_type == "command":
-                onebot_event["command"] = {
-                    "name": message_event.get("commandName", ""),
-                    "id": str(message_event.get("commandId", 0)),
-                    "args": content.get("text", "").replace(f"/{message_event.get('commandName', '')}", "").strip()
-                }
-                
-                # 表单类型指令
-                if content_type == "form":
-                    onebot_event["command"]["form"] = content.get("formJson", {})
-            
-        elif event_type in ["follow", "unfollow"]:
-            onebot_event.update({
-                "type": "notice",
-                "detail_type": "friend_" + ("increase" if event_type == "follow" else "decrease"),
-                "user_id": event_data.get("userId", ""),
-                "self": {
-                    "platform": "yunhu",
-                    "user_id": event_data.get("chatId", "")
-                }
-            })
-            
-        elif event_type in ["group_join", "group_leave"]:
-            onebot_event.update({
-                "type": "notice",
-                "detail_type": "group_member_" + ("increase" if event_type == "group_join" else "decrease"),
-                "sub_type": "invite" if event_type == "group_join" else "leave",
-                "group_id": event_data.get("chatId", ""),
-                "user_id": event_data.get("userId", ""),
-                "operator_id": "",
-                "self": {
-                    "platform": "yunhu",
-                    "user_id": ""
-                }
-            })
-            
-        elif event_type == "button_click":
-            onebot_event.update({
-                "type": "notice",
-                "detail_type": "button_click",
-                "user_id": event_data.get("userId", ""),
-                "message_id": event_data.get("msgId", ""),
-                "button": {
-                    "id": "",
-                    "value": event_data.get("value", "")
-                }
-            })
-            
-        elif event_type == "shortcut_menu":
-            onebot_event.update({
-                "type": "notice",
-                "detail_type": "shortcut_menu",
-                "user_id": event_data.get("senderId", ""),
-                "menu": {
-                    "id": event_data.get("menuId", ""),
-                    "type": event_data.get("menuType", 1),
-                    "action": event_data.get("menuAction", 1)
-                }
-            })
-            
-        else:
-            # 不支持的事件类型
-            return None
-            
-        return onebot_event
+        convert = Converter()
+        return convert.convert(event_data)
+    
     async def _process_webhook_event(self, data: Dict):
         try:
             if not isinstance(data, dict):
@@ -688,7 +502,7 @@ sdk.env.set("YunhuAdapter", {
             await self.emit(mapped_type, data)
             
             if hasattr(self, "emit_onebot12"):
-                onebot_event = await self._convert_to_onebot12(mapped_type, data)
+                onebot_event = await self._convert_to_onebot12(data)
                 if onebot_event:
                     await self.emit_onebot12(onebot_event.get("type", "unknown"), onebot_event)
 
