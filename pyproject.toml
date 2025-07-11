@@ -1,0 +1,19 @@
+[project]
+name = "ErisPulse-YunhuAdapter"
+version = "3.0.0"
+description = "ErisPulse的云湖协议适配模块"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [ { name = "wsu2059", email = "wsu2059@qq.com" } ]
+dependencies = [
+    "aiohttp",
+    "filetype"
+]
+
+[project.urls]
+"homepage" = "https://github.com/ErisPulse/ErisPulse-YunhuAdapter"
+
+[project.entry-points."erispulse.adapter"]
+yunhu = "YunhuAdapter:YunhuAdapter"
+yh = "YunhuAdapter:YunhuAdapter"
