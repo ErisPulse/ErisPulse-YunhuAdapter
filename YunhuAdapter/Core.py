@@ -387,24 +387,29 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.last_event_id = ""
 
     def _load_config(self) -> Dict:
-        config = self.sdk.env.get("YunhuAdapter", {})
+        config = self.sdk.env.getConfig("Yunhu_Adapter")
         if not config:
-            self.logger.warning("""云湖配置缺失，请在env.py中添加配置
-sdk.env.set("YunhuAdapter", {
-    "token": "",
-    "mode": "server",  # server / polling
-    "server": {
-        "host": "0.0.0.0",
-        "port": 25888,
-        "path": "/yunhu/webhook"
-    },
-    
-    "polling": {
-        "url": "https://sse.bot.anran.xyz/sse",
-    }
-})""")
+            default_config = {
+                "token": "",
+                "mode": "server",  # server / polling
+                "server": {
+                    "host": "0.0.0.0",
+                    "port": 25888,
+                    "path": "/yunhu/webhook"
+                },
+                
+                "polling": {
+                    "url": "https://sse.bot.anran.xyz/sse",
+                }
+            }
+            try:
+                sdk.logger.warning("云湖适配器配置不存在，已自动创建默认配置")
+                self.sdk.env.setConfig("Yunhu_Adapter", default_config)
+                return default_config
+            except Exception as e:
+                self.logger.error(f"保存默认配置失败: {str(e)}")
+                return default_config
         return config
-
     def _setup_event_mapping(self):
         self.event_map = {
             "message.receive.normal": "message",
