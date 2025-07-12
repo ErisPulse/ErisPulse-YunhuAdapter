@@ -9,7 +9,6 @@ from aiohttp import web
 from typing import Dict, List, Optional, Any, AsyncGenerator
 import filetype
 from ErisPulse import sdk
-from .Converter import Converter
 
 class Main:
     def __init__(self, sdk):
@@ -386,6 +385,13 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.polling_task: Optional[asyncio.Task] = None
         self.last_event_id = ""
 
+        self.convert = self._setup_coverter()
+
+    def _setup_coverter(self):
+        from .Converter import YunhuConverter
+        convert = YunhuConverter()
+        return convert.convert
+
     def _load_config(self) -> Dict:
         config = self.sdk.env.getConfig("Yunhu_Adapter")
         if not config:
@@ -473,24 +479,14 @@ class YunhuAdapter(sdk.BaseAdapter):
 
     async def _handle_webhook(self, request: web.Request) -> web.Response:
         try:
-            # 添加原始数据日志
-            raw_data = await request.text()
-            self.logger.debug(f"收到原始WebHook数据: {raw_data}")
-            
             data = await request.json()
-            self.logger.debug(f"解析后的WebHook数据: {json.dumps(data, indent=2)}")
             
             await self._process_webhook_event(data)
             return web.Response(text="OK", status=200)
         except Exception as e:
             self.logger.error(f"Webhook处理错误: {str(e)}", exc_info=True)
             return web.Response(text=f"ERROR: {str(e)}", status=500)
-    async def _convert_to_onebot12(self, data: Dict) -> Optional[Dict]:
-        header = data.get("header", {})
-        event_data = data.get("event", {})
-        convert = Converter()
-        return convert.convert(event_data)
-    
+        
     async def _process_webhook_event(self, data: Dict):
         try:
             if not isinstance(data, dict):
@@ -506,8 +502,10 @@ class YunhuAdapter(sdk.BaseAdapter):
             
             await self.emit(mapped_type, data)
             
+            self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
             if hasattr(self, "emit_onebot12"):
-                onebot_event = await self._convert_to_onebot12(data)
+                onebot_event = self.convert(data)
+                self.logger.debug(f"OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}")
                 if onebot_event:
                     await self.emit_onebot12(onebot_event.get("type", "unknown"), onebot_event)
 

@@ -9,27 +9,43 @@
 
 import time
 import uuid
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List, Any
 
-class Converter:
+class YunhuConverter:
     def __init__(self):
-        print("Converter init")
+        self._setup_event_mapping()
     
+    def _setup_event_mapping(self):
+        """初始化事件类型映射"""
+        self.event_map = {
+            "message.receive.normal": "message",
+            "message.receive.instruction": "command",
+            "bot.followed": "friend_increase",
+            "bot.unfollowed": "friend_decrease",
+            "group.join": "group_member_increase",
+            "group.leave": "group_member_decrease",
+            "button.report.inline": "yunhu_button_click",
+            "bot.shortcut.menu": "yunhu_shortcut_menu",
+            "bot.setting": "yunhu_bot_setting"
+        }
+
     def convert(self, data: Dict) -> Optional[Dict]:
         """
         主转换方法，根据事件类型分发到具体处理器
         
-        :param event_type: [str] 云湖平台事件类型
-        :param data: [Dict] 原始事件数据
-        
-        :return: 
-            Optional[Dict]: 转换后的OneBot12格式事件，None表示不支持的事件类型
-        
+        :param data: 原始事件数据
+        :return: 转换后的OneBot12格式事件，None表示不支持的事件类型
         :raises ValueError: 当事件数据格式错误时抛出
         """
+        if not isinstance(data, dict):
+            raise ValueError("事件数据必须是字典类型")
+
         header = data.get("header", {})
         event_data = data.get("event", {})
         event_type = header.get("eventType", "")
+
+        if not event_type:
+            raise ValueError("事件数据缺少eventType字段")
 
         # 基础事件结构
         onebot_event = {
@@ -42,9 +58,10 @@ class Converter:
             "self": {
                 "platform": "yunhu",
                 "user_id": ""
-            }
+            },
+            "yunhu_raw": data  # 保留原始数据
         }
-        
+
         # 根据事件类型分发处理
         if event_type.startswith("message.receive"):
             return self._handle_message_event(event_type, event_data, onebot_event)
@@ -56,6 +73,8 @@ class Converter:
             return self._handle_button_event(event_data, onebot_event)
         elif event_type == "bot.shortcut.menu":
             return self._handle_menu_event(event_data, onebot_event)
+        elif event_type == "bot.setting":
+            return self._handle_setting_event(event_data, onebot_event)
         
         return None
 
@@ -63,17 +82,10 @@ class Converter:
         """
         处理消息类型事件
         
-        {!--< tips >!--}
-        包含云湖特有字段：
-        - yunhu_command_form: 表单类型指令数据
-        - yunhu_message_form: 表单消息类型
-        {!--< /tips >!--}
-        
-        :param event_type: [str] 消息事件类型
-        :param event_data: [Dict] 事件数据
-        :param base_event: [Dict] 基础事件结构
-        
-        :return: [Dict] 转换后的消息事件
+        :param event_type: 消息事件类型
+        :param event_data: 事件数据
+        :param base_event: 基础事件结构
+        :return: 转换后的消息事件
         """
         message_event = event_data.get("message", {})
         sender = event_data.get("sender", {})
@@ -82,33 +94,44 @@ class Converter:
         content = message_event.get("content", {})
         
         message_segments = []
+        alt_message_parts = []
         
         # 处理不同内容类型的消息
         if content_type == "text":
+            text = content.get("text", "")
             message_segments.append({
                 "type": "text",
-                "data": {"text": content.get("text", "")}
+                "data": {"text": text}
             })
+            alt_message_parts.append(text)
         elif content_type == "image":
+            image_data = self._build_image_data(content)
             message_segments.append({
                 "type": "image",
-                "data": self._build_image_data(content)
+                "data": image_data
             })
+            alt_message_parts.append(f"[图片:{image_data.get('file_name', '')}]")
         elif content_type == "video":
+            video_data = self._build_video_data(content)
             message_segments.append({
                 "type": "video",
-                "data": self._build_video_data(content)
+                "data": video_data
             })
+            alt_message_parts.append(f"[视频:{video_data.get('file_name', '')}]")
         elif content_type == "file":
+            file_data = self._build_file_data(content)
             message_segments.append({
                 "type": "file",
-                "data": self._build_file_data(content)
+                "data": file_data
             })
+            alt_message_parts.append(f"[文件:{file_data.get('file_name', '')}]")
         elif content_type == "form":
+            form_data = self._build_form_data(content, message_event)
             message_segments.append({
                 "type": "yunhu_form",
-                "data": self._build_form_data(content, message_event)
+                "data": form_data
             })
+            alt_message_parts.append(f"[表单:{form_data.get('name', '')}]")
         
         # 处理按钮
         if content.get("buttons"):
@@ -116,28 +139,35 @@ class Converter:
                 "type": "yunhu_button",
                 "data": {"buttons": content["buttons"]}
             })
+            alt_message_parts.append("[按钮]")
+        
+        # 确定聊天类型
+        chat_type = chat_info.get("chatType", "")
+        detail_type = "private" if chat_type == "bot" else "group"
         
         # 构建最终事件
         base_event.update({
             "type": "message",
-            "detail_type": "private" if chat_info.get("chatType") == "bot" else "group",
+            "detail_type": detail_type,
             "sub_type": "command" if event_type == "message.receive.instruction" else "",
             "message_id": message_event.get("msgId", ""),
             "message": message_segments,
-            "alt_message": content.get("text", ""),
+            "alt_message": "".join(alt_message_parts),
             "user_id": sender.get("senderId", ""),
-            "group_id": chat_info.get("chatId", "") if chat_info.get("chatType") == "group" else "",
-            "self": {
-                "platform": "yunhu",
-                "user_id": chat_info.get("chatId", "") if chat_info.get("chatType") == "bot" else ""
-            }
         })
+
+        # 设置群聊ID或机器人ID
+        if detail_type == "group":
+            base_event["group_id"] = chat_info.get("chatId", "")
+            base_event["self"]["user_id"] = ""
+        else:
+            base_event["self"]["user_id"] = chat_info.get("chatId", "")
         
         # 处理指令消息
         if event_type == "message.receive.instruction":
             command_data = self._build_command_data(content, message_event, content_type)
             if content_type == "form":
-                base_event["yunhu_command_form"] = command_data.pop("form")
+                base_event["yunhu_command_form"] = command_data.pop("form", {})
             base_event["command"] = command_data
         
         return base_event
@@ -145,16 +175,10 @@ class Converter:
     def _handle_friend_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理机器人订阅关系变更事件
-        
-        :param event_type: [str] 事件类型
-        :param event_data: [Dict] 事件数据
-        :param base_event: [Dict] 基础事件结构
-        
-        :return: [Dict] 转换后的机器人订阅事件
         """
         base_event.update({
             "type": "notice",
-            "detail_type": "friend_" + ("increase" if event_type == "bot.followed" else "decrease"),
+            "detail_type": "friend_increase" if event_type == "bot.followed" else "friend_decrease",
             "user_id": event_data.get("userId", ""),
             "self": {
                 "platform": "yunhu",
@@ -166,20 +190,10 @@ class Converter:
     def _handle_group_member_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理群成员变更事件
-        
-        {!--< tips >!--}
-        注意：云湖平台的群成员变更事件与OneBot12标准略有不同
-        {!--< /tips >!--}
-        
-        :param event_type: [str] 事件类型
-        :param event_data: [Dict] 事件数据
-        :param base_event: [Dict] 基础事件结构
-        
-        :return: [Dict] 转换后的群成员事件
         """
         base_event.update({
             "type": "notice",
-            "detail_type": "group_member_" + ("increase" if event_type == "group.join" else "decrease"),
+            "detail_type": "group_member_increase" if event_type == "group.join" else "group_member_decrease",
             "sub_type": "invite" if event_type == "group.join" else "leave",
             "group_id": event_data.get("chatId", ""),
             "user_id": event_data.get("userId", ""),
@@ -194,15 +208,6 @@ class Converter:
     def _handle_button_event(self, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理按钮点击事件
-        
-        {!--< tips >!--}
-        注意：此事件类型为云湖平台特有，非OneBot12标准
-        {!--< /tips >!--}
-        
-        :param event_data: [Dict] 事件数据
-        :param base_event: [Dict] 基础事件结构
-        
-        :return: [Dict] 转换后的按钮事件
         """
         base_event.update({
             "type": "notice",
@@ -210,8 +215,12 @@ class Converter:
             "user_id": event_data.get("userId", ""),
             "message_id": event_data.get("msgId", ""),
             "yunhu_button": {
-                "id": "",
+                "id": event_data.get("buttonId", ""),
                 "value": event_data.get("value", "")
+            },
+            "self": {
+                "platform": "yunhu",
+                "user_id": ""
             }
         })
         return base_event
@@ -219,36 +228,42 @@ class Converter:
     def _handle_menu_event(self, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理快捷菜单事件
-        
-        {!--< tips >!--}
-        注意：此事件类型为云湖平台特有，非OneBot12标准
-        {!--< /tips >!--}
-        
-        :param event_data: [Dict] 事件数据
-        :param base_event: [Dict] 基础事件结构
-        
-        :return: [Dict] 转换后的菜单事件
         """
         base_event.update({
             "type": "notice",
             "detail_type": "yunhu_shortcut_menu",
             "user_id": event_data.get("senderId", ""),
+            "group_id": event_data.get("chatId", "") if event_data.get("chatType") == "group" else "",
             "yunhu_menu": {
                 "id": event_data.get("menuId", ""),
                 "type": event_data.get("menuType", 1),
                 "action": event_data.get("menuAction", 1)
+            },
+            "self": {
+                "platform": "yunhu",
+                "user_id": ""
+            }
+        })
+        return base_event
+
+    def _handle_setting_event(self, event_data: Dict, base_event: Dict) -> Dict:
+        """
+        处理机器人设置事件
+        """
+        base_event.update({
+            "type": "notice",
+            "detail_type": "yunhu_bot_setting",
+            "group_id": event_data.get("groupId", ""),
+            "yunhu_setting": event_data.get("settingJson", {}),
+            "self": {
+                "platform": "yunhu",
+                "user_id": event_data.get("chatId", "")
             }
         })
         return base_event
 
     def _build_image_data(self, content: Dict) -> Dict:
-        """
-        构建图片消息数据
-        
-        :param content: [Dict] 原始图片内容数据
-        
-        :return: [Dict] 标准化的图片数据
-        """
+        """构建图片消息数据"""
         return {
             "file_id": content.get("imageUrl", ""),
             "url": content.get("imageUrl", ""),
@@ -259,13 +274,7 @@ class Converter:
         }
 
     def _build_video_data(self, content: Dict) -> Dict:
-        """
-        构建视频消息数据
-        
-        :param content: [Dict] 原始视频内容数据
-        
-        :return: [Dict] 标准化的视频数据
-        """
+        """构建视频消息数据"""
         return {
             "file_id": content.get("videoUrl", ""),
             "url": content.get("videoUrl", ""),
@@ -275,13 +284,7 @@ class Converter:
         }
 
     def _build_file_data(self, content: Dict) -> Dict:
-        """
-        构建文件消息数据
-        
-        :param content: [Dict] 原始文件内容数据
-        
-        :return: [Dict] 标准化的文件数据
-        """
+        """构建文件消息数据"""
         return {
             "file_id": content.get("fileUrl", ""),
             "url": content.get("fileUrl", ""),
@@ -292,15 +295,6 @@ class Converter:
     def _build_form_data(self, content: Dict, message_event: Dict) -> Dict:
         """
         构建表单消息数据
-        
-        {!--< tips >!--}
-        注意：表单消息类型为云湖平台特有，非OneBot12标准
-        {!--< /tips >!--}
-        
-        :param content: [Dict] 原始表单内容数据
-        :param message_event: [Dict] 消息事件数据
-        
-        :return: [Dict] 标准化的表单数据
         """
         form_json = content.get("formJson", {})
         form_data = []
@@ -340,16 +334,6 @@ class Converter:
     def _build_command_data(self, content: Dict, message_event: Dict, content_type: str) -> Dict:
         """
         构建指令数据
-        
-        {!--< tips >!--}
-        注意：表单类型指令为云湖平台特有，非OneBot12标准
-        {!--< /tips >!--}
-        
-        :param content: [Dict] 消息内容数据
-        :param message_event: [Dict] 消息事件数据
-        :param content_type: [str] 内容类型
-        
-        :return: [Dict] 标准化的指令数据
         """
         command_data = {
             "name": message_event.get("commandName", ""),
@@ -358,6 +342,7 @@ class Converter:
         }
         
         if content_type == "form":
-            command_data["yunhu_form"] = content.get("formJson", {})
+            command_data["form"] = content.get("formJson", {})
         
         return command_data
+    

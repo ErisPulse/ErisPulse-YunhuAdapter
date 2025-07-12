@@ -166,12 +166,12 @@ async def main():
         await sdk.adapter.startup()
         await asyncio.sleep(1)  # 等待适配器初始化
         
-        await sdk.AnyMsgSync.start()
+        # await sdk.AnyMsgSync.start()
 
         # 注册并测试OneBot12事件处理器
-        await test_onebot_message_events()
-        await test_onebot_notice_events()
-        await test_onebot_button_events()
+        # await test_onebot_message_events()
+        # await test_onebot_notice_events()
+        # await test_onebot_button_events()
         await test_onebot_all_events()
         sdk.logger.info("OneBot12测试已启动，请手动触发各种事件进行测试...")
         sdk.logger.info("1. 发送私聊/群聊消息测试message事件")
