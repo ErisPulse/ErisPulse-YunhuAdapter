@@ -10,11 +10,6 @@ from typing import Dict, List, Optional, Any, AsyncGenerator
 import filetype
 from ErisPulse import sdk
 
-class Main:
-    def __init__(self, sdk):
-        self.sdk = sdk
-        self.logger = sdk.logger
-
 class YunhuAdapter(sdk.BaseAdapter):
     class Send(sdk.BaseAdapter.Send):
         def Text(self, text: str, buttons: List = None, parent_id: str = ""):
@@ -372,6 +367,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         super().__init__()
         self.sdk = sdk
         self.logger = sdk.logger
+        self.adapter = sdk.adapter
+
         self.config = self._load_config()
         self.yhToken = self.config.get("token", "")
         self.session: Optional[aiohttp.ClientSession] = None
@@ -503,11 +500,11 @@ class YunhuAdapter(sdk.BaseAdapter):
             await self.emit(mapped_type, data)
             
             self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
-            if hasattr(self, "emit_onebot12"):
+            if hasattr(self.adapter, "emit"):
                 onebot_event = self.convert(data)
                 self.logger.debug(f"OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}")
                 if onebot_event:
-                    await self.emit_onebot12(onebot_event.get("type", "unknown"), onebot_event)
+                    await self.adapter.emit(onebot_event)
 
         except Exception as e:
             self.logger.error(f"处理事件错误: {str(e)}")
