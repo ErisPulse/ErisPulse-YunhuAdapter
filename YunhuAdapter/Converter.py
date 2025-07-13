@@ -1,5 +1,5 @@
 """
-云湖平台事件转换模块 (优化版)
+云湖平台事件转换模块
 严格遵循OneBot 12标准格式进行事件转换
 
 {!--< tips >!--}
@@ -36,7 +36,7 @@ class YunhuConverter:
 
     def convert(self, data: Dict) -> Optional[Dict]:
         """
-        主转换方法（优化版）
+        主转换方法
         
         改进点：
         1. 严格分离标准字段和扩展字段
