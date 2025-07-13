@@ -9,9 +9,7 @@ test_group_id = "635409929"     # 设为None则不测试群聊功能
 
 async def test_onebot_message_events():
     """测试OneBot12消息事件监听"""
-    yunhu = sdk.adapter.yunhu
-    
-    @yunhu.on_OneBot12("message")
+    @sdk.adapter.on("message")
     async def handle_onebot_message(event):
         sdk.logger.info("\n" + "="*50)
         sdk.logger.info("收到OneBot12格式消息事件:")
@@ -46,9 +44,7 @@ async def test_onebot_message_events():
 # """)
 async def test_onebot_notice_events():
     """测试OneBot12通知事件监听"""
-    yunhu = sdk.adapter.yunhu
-    
-    @yunhu.on_OneBot12("notice")
+    @sdk.adapter.on("notice")
     async def handle_onebot_notice(event):
         sdk.logger.info("\n" + "="*50)
         sdk.logger.info("收到OneBot12格式通知事件:")
@@ -81,9 +77,7 @@ async def test_onebot_notice_events():
 # """)
 async def test_onebot_button_events():
     """测试OneBot12按钮事件监听"""
-    yunhu = sdk.adapter.yunhu
-    
-    @yunhu.on_OneBot12("button_click")
+    @sdk.adapter.on("button_click")
     async def handle_onebot_button(event):
         sdk.logger.info("\n" + "="*50)
         sdk.logger.info("收到OneBot12格式按钮事件:")
@@ -129,9 +123,8 @@ async def test_onebot_button_events():
 
 async def test_onebot_all_events():
     """测试OneBot12所有事件监听"""
-    yunhu = sdk.adapter.yunhu
     
-    @yunhu.on_OneBot12("*")  # 监听所有OneBot12事件
+    @sdk.adapter.on("*")  # 监听所有OneBot12事件
     async def handle_all_onebot_events(event):
         sdk.logger.info("\n" + "="*50)
         sdk.logger.info("收到OneBot12格式事件(所有类型):")
