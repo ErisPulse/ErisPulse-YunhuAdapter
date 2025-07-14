@@ -5,7 +5,7 @@ from ErisPulse import sdk
 
 # 测试配置
 test_user_id = "5197892"        # 设为None则不测试私聊功能
-test_group_id = "635409929"     # 设为None则不测试群聊功能
+test_group_id = "853732258"     # 设为None则不测试群聊功能
 
 async def test_onebot_message_events():
     """测试OneBot12消息事件监听"""
@@ -137,6 +137,8 @@ async def test_onebot_all_events():
         
         import json
         formatted_event = json.dumps(event, indent=2, ensure_ascii=False)
+        raw_event = event.get(f"{event.get('platform')}_raw", event)
+        raw_event = json.dumps(raw_event, indent=2, ensure_ascii=False)
         
         if test_user_id:
             Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
@@ -148,6 +150,11 @@ async def test_onebot_all_events():
         if test_group_id: 
             Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
             result = await Send.Markdown(f"""
+原始事件:
+```json
+{raw_event}
+```
+转换后
 ```json
 {formatted_event}
 ```

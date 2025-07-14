@@ -1,265 +1,15 @@
 # 云湖适配器与OneBot12协议的转换对照
 
 ### 1. 文本消息（普通消息）
-云湖协议输入：
+
+原始事件:
 ```json
 {
   "version": "1.0",
   "header": {
-    "eventId": "c192ccc83d5147f2859ca77bcfafc9f9",
+    "eventId": "e4c11b08a7b74bbab89cfa5bf3ac8426",
     "eventType": "message.receive.normal",
-    "eventTime": 1748613099002
-  },
-  "event": {
-    "sender": {
-      "senderId": "6300451",
-      "senderType": "user",
-      "senderUserLevel": "owner",
-      "senderNickname": "ShanFish"
-    },
-    "chat": {
-      "chatId": "49871624",
-      "chatType": "bot"
-    },
-    "message": {
-      "msgId": "5c887bc0a82244c7969c08000f5b3ae8",
-      "parentId": "",
-      "sendTime": 1748613098989,
-      "chatId": "49871624",
-      "chatType": "bot",
-      "contentType": "text",
-      "content": {
-        "text": "你好"
-      }
-    }
-  }
-}
-```
-OneBot12协议输出：
-```json
-{
-  "id": "c192ccc83d5147f2859ca77bcfafc9f9",
-  "time": 1748613099,
-  "type": "message",
-  "detail_type": "private",
-  "sub_type": "",
-  "platform": "yunhu",
-  "self": {
-    "platform": "yunhu",
-    "user_id": "49871624"
-  },
-  "message_id": "5c887bc0a82244c7969c08000f5b3ae8",
-  "message": [
-    {
-      "type": "text",
-      "data": {
-        "text": "你好"
-      }
-    }
-  ],
-  "alt_message": "你好",
-  "user_id": "6300451"
-}
-```
-### 2. 图片消息
-云湖协议输入：
-```json
-{
-  "version": "1.0",
-  "header": {
-    "eventId": "74e2567cf0494f37af1beee9a37c7cd3",
-    "eventType": "message.receive.normal",
-    "eventTime": 1752083350157
-  },
-  "event": {
-    "sender": {
-      "senderId": "2129537",
-      "senderType": "user",
-      "senderUserLevel": "member",
-      "senderNickname": "用户2129537"
-    },
-    "chat": {
-      "chatId": "635409929",
-      "chatType": "group"
-    },
-    "message": {
-      "msgId": "8d104a58549648e8b7c4bfe23aba6ae0",
-      "contentType": "image",
-      "content": {
-        "imageUrl": "https://chat-storage1.jwznb.com/e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "imageName": "e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "imageWidth": 8000,
-        "imageHeight": 6000
-      }
-    }
-  }
-}
-```
-OneBot12协议输出：
-```json
-{
-  "id": "74e2567cf0494f37af1beee9a37c7cd3",
-  "time": 1752083350,
-  "type": "message",
-  "detail_type": "group",
-  "sub_type": "",
-  "platform": "yunhu",
-  "self": {
-    "platform": "yunhu",
-    "user_id": ""
-  },
-  "message_id": "8d104a58549648e8b7c4bfe23aba6ae0",
-  "message": [
-    {
-      "type": "image",
-      "data": {
-        "file_id": "https://chat-storage1.jwznb.com/e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "url": "https://chat-storage1.jwznb.com/e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "file_name": "e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "width": 8000,
-        "height": 6000
-      }
-    }
-  ],
-  "alt_message": "",
-  "user_id": "2129537",
-  "group_id": "635409929"
-}
-```
-### 3. 视频消息
-云湖协议输入：
-```json
-{
-  "version": "1.0",
-  "header": {
-    "eventId": "6839c7755f544fd7b6f21d62f4e00401",
-    "eventType": "message.receive.normal",
-    "eventTime": 1752083413361
-  },
-  "event": {
-    "sender": {
-      "senderId": "2129537",
-      "senderType": "user",
-      "senderUserLevel": "member",
-      "senderNickname": "用户2129537"
-    },
-    "chat": {
-      "chatId": "635409929",
-      "chatType": "group"
-    },
-    "message": {
-      "msgId": "18bbf7cdc6aa454b876865532da4ee22",
-      "contentType": "video",
-      "content": {
-        "videoUrl": "ccaf1eaaaa4d1996a952e148f2b18705.mp4",
-        "videoDuration": 1
-      }
-    }
-  }
-}
-```
-OneBot12协议输出：
-```json
-{
-  "id": "6839c7755f544fd7b6f21d62f4e00401",
-  "time": 1752083413,
-  "type": "message",
-  "detail_type": "group",
-  "sub_type": "",
-  "platform": "yunhu",
-  "self": {
-    "platform": "yunhu",
-    "user_id": ""
-  },
-  "message_id": "18bbf7cdc6aa454b876865532da4ee22",
-  "message": [
-    {
-      "type": "video",
-      "data": {
-        "file_id": "ccaf1eaaaa4d1996a952e148f2b18705.mp4",
-        "url": "ccaf1eaaaa4d1996a952e148f2b18705.mp4",
-        "file_name": "ccaf1eaaaa4d1996a952e148f2b18705.mp4",
-        "duration": 1
-      }
-    }
-  ],
-  "alt_message": "",
-  "user_id": "2129537",
-  "group_id": "635409929"
-}
-```
-### 4. 文件消息
-云湖协议输入：
-```json
-{
-  "version": "1.0",
-  "header": {
-    "eventId": "f60a6e0fa1414f8e85803e12f9b20613",
-    "eventType": "message.receive.normal",
-    "eventTime": 1752083425408
-  },
-  "event": {
-    "sender": {
-      "senderId": "2129537",
-      "senderType": "user",
-      "senderUserLevel": "member",
-      "senderNickname": "用户2129537"
-    },
-    "chat": {
-      "chatId": "635409929",
-      "chatType": "group"
-    },
-    "message": {
-      "msgId": "0957bb9e73ed4defa74b51c6efb69470",
-      "contentType": "file",
-      "content": {
-        "fileName": "IMG_20250710_013859088.jpg",
-        "fileUrl": "e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "fileSize": 8720285
-      }
-    }
-  }
-}
-```
-OneBot12协议输出：
-```json
-{
-  "id": "f60a6e0fa1414f8e85803e12f9b20613",
-  "time": 1752083425,
-  "type": "message",
-  "detail_type": "group",
-  "sub_type": "",
-  "platform": "yunhu",
-  "self": {
-    "platform": "yunhu",
-    "user_id": ""
-  },
-  "message_id": "0957bb9e73ed4defa74b51c6efb69470",
-  "message": [
-    {
-      "type": "file",
-      "data": {
-        "file_id": "e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "url": "e22aacd7951783a51a1dcd5f602e5428.jpg",
-        "file_name": "IMG_20250710_013859088.jpg",
-        "size": 8720285
-      }
-    }
-  ],
-  "alt_message": "",
-  "user_id": "2129537",
-  "group_id": "635409929"
-}
-```
-### 5. 指令消息（带表单）
-云湖协议输入：
-```json
-{
-  "version": "1.0",
-  "header": {
-    "eventId": "5cdde5bf2f184a5e87b1da62dfc6df10",
-    "eventType": "message.receive.instruction",
-    "eventTime": 1752083091036
+    "eventTime": 1752471707745
   },
   "event": {
     "sender": {
@@ -269,182 +19,604 @@ OneBot12协议输出：
       "senderNickname": "YingXinche"
     },
     "chat": {
-      "chatId": "635409929",
+      "chatId": "853732258",
       "chatType": "group"
     },
     "message": {
-      "msgId": "a06d07462b1b48a6b5d39f5b85e0a95d",
-      "contentType": "form",
+      "msgId": "5922f47e4a334b4f86915b0bfc02d553",
+      "parentId": "",
+      "sendTime": 1752471707736,
+      "chatId": "853732258",
+      "chatType": "group",
+      "contentType": "text",
       "content": {
-        "formJson": {
-          "gurpgk": {
-            "value": "1",
-            "type": "input"
-          },
-          "owtgcl": {
-            "value": true,
-            "type": "switch"
-          }
-        }
+        "text": "1"
       },
-      "instructionId": 1766,
-      "instructionName": "123123"
+      "instructionId": 0,
+      "instructionName": "",
+      "commandId": 0,
+      "commandName": ""
     }
   }
 }
 ```
-OneBot12协议输出：
+转换后
 ```json
 {
-  "id": "5cdde5bf2f184a5e87b1da62dfc6df10",
-  "time": 1752083091,
+  "id": "e4c11b08a7b74bbab89cfa5bf3ac8426",
+  "time": 1752471707,
   "type": "message",
   "detail_type": "group",
-  "sub_type": "command",
+  "sub_type": "",
   "platform": "yunhu",
   "self": {
     "platform": "yunhu",
     "user_id": ""
   },
-  "message_id": "a06d07462b1b48a6b5d39f5b85e0a95d",
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "message_id": "5922f47e4a334b4f86915b0bfc02d553",
   "message": [
     {
-      "type": "form",
+      "type": "text",
       "data": {
-        "id": "1766",
+        "text": "1"
+      }
+    }
+  ],
+  "alt_message": "1",
+  "user_id": "5197892",
+  "group_id": "853732258"
+}
+```
+
+### 2. 图片消息
+
+原始事件:
+```json
+{
+  "version": "1.0",
+  "header": {
+    "eventId": "ec4f242e3e244d7088b085815a90c4c9",
+    "eventType": "message.receive.normal",
+    "eventTime": 1752471718575
+  },
+  "event": {
+    "sender": {
+      "senderId": "5197892",
+      "senderType": "user",
+      "senderUserLevel": "owner",
+      "senderNickname": "YingXinche"
+    },
+    "chat": {
+      "chatId": "853732258",
+      "chatType": "group"
+    },
+    "message": {
+      "msgId": "9c2ce3ef32774479854ca04a3bf3738b",
+      "parentId": "",
+      "sendTime": 1752471718404,
+      "chatId": "853732258",
+      "chatType": "group",
+      "contentType": "image",
+      "content": {
+        "imageUrl": "https://chat-storage1.jwznb.com/b035eeac93d31ec33cb5a106cdf10d07.png?sign=71a455d9a51152b03ce213dc621fb7f4&t=6874a6b6",
+        "imageName": "b035eeac93d31ec33cb5a106cdf10d07.png",
+        "etag": "Fp8HilojhNGBJugfq1odZiP3Y-i-",
+        "imageWidth": 48,
+        "imageHeight": 25
+      },
+      "instructionId": 0,
+      "instructionName": "",
+      "commandId": 0,
+      "commandName": ""
+    }
+  }
+}
+```
+转换后
+```json
+{
+  "id": "ec4f242e3e244d7088b085815a90c4c9",
+  "time": 1752471718,
+  "type": "message",
+  "detail_type": "group",
+  "sub_type": "",
+  "platform": "yunhu",
+  "self": {
+    "platform": "yunhu",
+    "user_id": ""
+  },
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "message_id": "9c2ce3ef32774479854ca04a3bf3738b",
+  "message": [
+    {
+      "type": "image",
+      "data": {
+        "file_id": "https://chat-storage1.jwznb.com/b035eeac93d31ec33cb5a106cdf10d07.png?sign=71a455d9a51152b03ce213dc621fb7f4&t=6874a6b6",
+        "url": "https://chat-storage1.jwznb.com/b035eeac93d31ec33cb5a106cdf10d07.png?sign=71a455d9a51152b03ce213dc621fb7f4&t=6874a6b6",
+        "file_name": "b035eeac93d31ec33cb5a106cdf10d07.png",
+        "width": 48,
+        "height": 25
+      }
+    }
+  ],
+  "alt_message": "[图片:b035eeac93d31ec33cb5a106cdf10d07.png]",
+  "user_id": "5197892",
+  "group_id": "853732258"
+}
+```
+
+### 3. 视频消息
+
+原始事件:
+```json
+{
+  "version": "1.0",
+  "header": {
+    "eventId": "318a40dc58194503aac43fb0aa10d989",
+    "eventType": "message.receive.normal",
+    "eventTime": 1752471734500
+  },
+  "event": {
+    "sender": {
+      "senderId": "5197892",
+      "senderType": "user",
+      "senderUserLevel": "owner",
+      "senderNickname": "YingXinche"
+    },
+    "chat": {
+      "chatId": "853732258",
+      "chatType": "group"
+    },
+    "message": {
+      "msgId": "a8f74727a01d4c9ba5bdd2dbade72169",
+      "parentId": "",
+      "sendTime": 1752471734088,
+      "chatId": "853732258",
+      "chatType": "group",
+      "contentType": "video",
+      "content": {
+        "etag": "lpxYPI2jzL-TLIiw7Md6Xu24r8ED",
+        "videoUrl": "8dd8b1491001f6ae1f37f58ebed21e35.mp4",
+        "videoDuration": 57
+      },
+      "instructionId": 0,
+      "instructionName": "",
+      "commandId": 0,
+      "commandName": ""
+    }
+  }
+}
+```
+转换后
+```json
+{
+  "id": "318a40dc58194503aac43fb0aa10d989",
+  "time": 1752471734,
+  "type": "message",
+  "detail_type": "group",
+  "sub_type": "",
+  "platform": "yunhu",
+  "self": {
+    "platform": "yunhu",
+    "user_id": ""
+  },
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "message_id": "a8f74727a01d4c9ba5bdd2dbade72169",
+  "message": [
+    {
+      "type": "video",
+      "data": {
+        "file_id": "8dd8b1491001f6ae1f37f58ebed21e35.mp4",
+        "url": "8dd8b1491001f6ae1f37f58ebed21e35.mp4",
+        "file_name": "",
+        "width": 0,
+        "height": 0,
+        "duration": 57
+      }
+    }
+  ],
+  "alt_message": "[视频:]",
+  "user_id": "5197892",
+  "group_id": "853732258"
+}
+```
+
+### 4. 文件消息
+
+原始事件:
+```json
+{
+  "version": "1.0",
+  "header": {
+    "eventId": "9cbc1d5840a547f2a7f98342d6d995ff",
+    "eventType": "message.receive.normal",
+    "eventTime": 1752471740254
+  },
+  "event": {
+    "sender": {
+      "senderId": "5197892",
+      "senderType": "user",
+      "senderUserLevel": "owner",
+      "senderNickname": "YingXinche"
+    },
+    "chat": {
+      "chatId": "853732258",
+      "chatType": "group"
+    },
+    "message": {
+      "msgId": "d713f5beccfb4d5894af25d36a8dd2f1",
+      "parentId": "",
+      "sendTime": 1752471740246,
+      "chatId": "853732258",
+      "chatType": "group",
+      "contentType": "file",
+      "content": {
+        "fileName": "cline_task_jun-5-2025_9-33-00-pm.md",
+        "fileUrl": "920be2c6723242e08ee75e0faee87611",
+        "etag": "FtTNpPdS5ZAlnhXBP5EfdvoIg_XX",
+        "fileSize": 23900
+      },
+      "instructionId": 0,
+      "instructionName": "",
+      "commandId": 0,
+      "commandName": ""
+    }
+  }
+}
+```
+转换后
+```json
+{
+  "id": "9cbc1d5840a547f2a7f98342d6d995ff",
+  "time": 1752471740,
+  "type": "message",
+  "detail_type": "group",
+  "sub_type": "",
+  "platform": "yunhu",
+  "self": {
+    "platform": "yunhu",
+    "user_id": ""
+  },
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "message_id": "d713f5beccfb4d5894af25d36a8dd2f1",
+  "message": [
+    {
+      "type": "file",
+      "data": {
+        "file_id": "920be2c6723242e08ee75e0faee87611",
+        "url": "920be2c6723242e08ee75e0faee87611",
+        "file_name": "cline_task_jun-5-2025_9-33-00-pm.md",
+        "size": 23900
+      }
+    }
+  ],
+  "alt_message": "[文件:cline_task_jun-5-2025_9-33-00-pm.md]",
+  "user_id": "5197892",
+  "group_id": "853732258"
+}
+```
+
+### 5. 指令消息（带表单）
+
+原始事件:
+```json
+{
+  "version": "1.0",
+  "header": {
+    "eventId": "04a528cd53aa4f9b8ccd16868645c172",
+    "eventType": "message.receive.instruction",
+    "eventTime": 1752471814418
+  },
+  "event": {
+    "sender": {
+      "senderId": "2129537",
+      "senderType": "user",
+      "senderUserLevel": "member",
+      "senderNickname": "北医六院精神科"
+    },
+    "chat": {
+      "chatId": "30535459",
+      "chatType": "bot"
+    },
+    "message": {
+      "msgId": "da865dea10df4ab299624d634015e654",
+      "parentId": "",
+      "sendTime": 1752471814408,
+      "chatId": "30535459",
+      "chatType": "bot",
+      "contentType": "form",
+      "content": {
+        "formJson": {
+          "abgapt": {
+            "id": "abgapt",
+            "type": "textarea",
+            "label": null,
+            "value": ""
+          },
+          "mnabyo": {
+            "selectIndex": 0,
+            "selectValue": "",
+            "id": "mnabyo",
+            "type": "select",
+            "label": null
+          },
+          "gvanmu": {
+            "id": "gvanmu",
+            "type": "radio",
+            "label": null,
+            "selectIndex": -1,
+            "selectValue": ""
+          },
+          "gurpgk": {
+            "id": "gurpgk",
+            "type": "input",
+            "label": null,
+            "value": null
+          },
+          "owtgcl": {
+            "id": "owtgcl",
+            "type": "switch",
+            "label": null,
+            "value": false
+          },
+          "qkmlif": {
+            "id": "qkmlif",
+            "type": "checkbox",
+            "label": null,
+            "selectStatus": [
+              false
+            ],
+            "selectValues": []
+          }
+        }
+      },
+      "instructionId": 1766,
+      "instructionName": "123123",
+      "commandId": 1766,
+      "commandName": "123123"
+    }
+  }
+}
+```
+转换后
+```json
+{
+  "id": "04a528cd53aa4f9b8ccd16868645c172",
+  "time": 1752471814,
+  "type": "message",
+  "detail_type": "private",
+  "sub_type": "",
+  "platform": "yunhu",
+  "self": {
+    "platform": "yunhu",
+    "user_id": "30535459"
+  },
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "message_id": "da865dea10df4ab299624d634015e654",
+  "message": [
+    {
+      "type": "yunhu_form",
+      "data": {
+        "id": 1766,
         "name": "123123",
         "fields": [
           {
+            "id": "abgapt",
+            "type": "textarea",
+            "label": null,
+            "value": ""
+          },
+          {
+            "id": "mnabyo",
+            "type": "select",
+            "label": null,
+            "value": ""
+          },
+          {
+            "id": "gvanmu",
+            "type": "radio",
+            "label": null,
+            "value": ""
+          },
+          {
             "id": "gurpgk",
             "type": "input",
-            "value": "1"
+            "label": null,
+            "value": null
           },
           {
             "id": "owtgcl",
             "type": "switch",
-            "value": "true"
+            "label": null,
+            "value": "False"
+          },
+          {
+            "id": "qkmlif",
+            "type": "checkbox",
+            "label": null,
+            "value": ""
           }
         ]
       }
     }
   ],
-  "alt_message": "",
-  "user_id": "5197892",
-  "group_id": "635409929",
-  "command": {
+  "alt_message": "[表单:123123]",
+  "user_id": "2129537",
+  "yunhu_command": {
     "name": "123123",
     "id": "1766",
+    "args": "",
     "form": {
+      "abgapt": {
+        "id": "abgapt",
+        "type": "textarea",
+        "label": null,
+        "value": ""
+      },
+      "mnabyo": {
+        "selectIndex": 0,
+        "selectValue": "",
+        "id": "mnabyo",
+        "type": "select",
+        "label": null
+      },
+      "gvanmu": {
+        "id": "gvanmu",
+        "type": "radio",
+        "label": null,
+        "selectIndex": -1,
+        "selectValue": ""
+      },
       "gurpgk": {
-        "value": "1",
-        "type": "input"
+        "id": "gurpgk",
+        "type": "input",
+        "label": null,
+        "value": null
       },
       "owtgcl": {
-        "value": true,
-        "type": "switch"
+        "id": "owtgcl",
+        "type": "switch",
+        "label": null,
+        "value": false
+      },
+      "qkmlif": {
+        "id": "qkmlif",
+        "type": "checkbox",
+        "label": null,
+        "selectStatus": [
+          false
+        ],
+        "selectValues": []
       }
     }
   }
 }
 ```
+
 ### 6. 按钮点击事件
-云湖协议输入：
+
+原始事件:
 ```json
 {
   "version": "1.0",
   "header": {
-    "eventId": "0d6d269ff7f046828c8562f905f9ee08",
+    "eventId": "6e74603b06854b06b0103d62a7c86867",
     "eventType": "button.report.inline",
-    "eventTime": 1749446185273
+    "eventTime": 1752471702516
   },
   "event": {
-    "time": 1749446185268,
-    "msgId": "1838c3dd84474e9e9e1e00ca64e72065",
-    "recvId": "6300451",
-    "recvType": "user",
-    "userId": "6300451",
-    "value": "xxxx"
+    "time": 1752471702513,
+    "msgId": "168da7860ce040efa346bcbf54c1f45e",
+    "recvId": "853732258",
+    "recvType": "group",
+    "userId": "5197892",
+    "value": "test_button_value"
   }
 }
 ```
-OneBot12协议输出：
+转换后
 ```json
 {
-  "id": "0d6d269ff7f046828c8562f905f9ee08",
-  "time": 1749446185,
+  "id": "6e74603b06854b06b0103d62a7c86867",
+  "time": 1752471702,
   "type": "notice",
-  "detail_type": "button_click",
+  "detail_type": "yunhu_button_click",
+  "sub_type": "",
   "platform": "yunhu",
   "self": {
     "platform": "yunhu",
     "user_id": ""
   },
-  "user_id": "6300451",
-  "message_id": "1838c3dd84474e9e9e1e00ca64e72065",
-  "button": {
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "user_id": "5197892",
+  "message_id": "168da7860ce040efa346bcbf54c1f45e",
+  "yunhu_button": {
     "id": "",
-    "value": "xxxx"
+    "value": "test_button_value"
   }
 }
 ```
+
 ### 7. 关注机器人事件
-云湖协议输入：
+
+原始事件:
 ```json
 {
   "version": "1.0",
   "header": {
-    "eventId": "3fe280a400f9460daa03a642d1fad39b",
+    "eventId": "39d9d0a90c4d4228a709a5e4a1582d02",
     "eventType": "bot.followed",
-    "eventTime": 1749443049592
+    "eventTime": 1752471787508
   },
   "event": {
-    "time": 1749443049580,
-    "chatId": "49871624",
+    "time": 1752471787494,
+    "chatId": "30535459",
     "chatType": "bot",
-    "userId": "3707697",
-    "nickname": "ShanFishApp"
+    "userId": "2129537",
+    "nickname": "北医六院精神科",
+    "avatarUrl": "https://chat-storage1.jwznb.com/953ac44df2c868727e399d491e5e7090.jpg?sign=3bd02bfd1fed3a87fca8264a5b17078a&t=6874a6fb"
   }
 }
 ```
-OneBot12协议输出：
+转换后
 ```json
 {
-  "id": "3fe280a400f9460daa03a642d1fad39b",
-  "time": 1749443049,
+  "id": "39d9d0a90c4d4228a709a5e4a1582d02",
+  "time": 1752471787,
   "type": "notice",
   "detail_type": "friend_increase",
+  "sub_type": "",
   "platform": "yunhu",
   "self": {
     "platform": "yunhu",
-    "user_id": "49871624"
+    "user_id": "30535459"
   },
-  "user_id": "3707697"
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "user_id": "2129537"
 }
 ```
+
 ### 8. 用户加群事件
-云湖协议输入：
+
+原始事件:
 ```json
 {
   "version": "1.0",
   "header": {
-    "eventId": "d5429cb5e4654fbcaeee9e4adb244741",
+    "eventId": "15cc20a2f3464ac7a621eaf04e3e2a4b",
     "eventType": "group.join",
-    "eventTime": 1749442891943
+    "eventTime": 1752472053581
   },
   "event": {
-    "time": 1749442891843,
-    "chatId": "985140593",
+    "time": 1752472053558,
+    "chatId": "635409929",
     "chatType": "group",
-    "userId": "3707697",
-    "nickname": "ShanFishApp"
+    "userId": "2129537",
+    "nickname": "北医六院精神科",
+    "avatarUrl": "https://chat-storage1.jwznb.com/953ac44df2c868727e399d491e5e7090.jpg?sign=c196eed102f9bc1397d79fd827e0d374&t=6874a805"
   }
 }
 ```
-OneBot12协议输出：
+转换后
 ```json
 {
-  "id": "d5429cb5e4654fbcaeee9e4adb244741",
-  "time": 1749442891,
+  "id": "15cc20a2f3464ac7a621eaf04e3e2a4b",
+  "time": 1752472053,
   "type": "notice",
   "detail_type": "group_member_increase",
   "sub_type": "invite",
@@ -453,8 +625,106 @@ OneBot12协议输出：
     "platform": "yunhu",
     "user_id": ""
   },
-  "group_id": "985140593",
-  "user_id": "3707697",
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "group_id": "635409929",
+  "user_id": "2129537",
   "operator_id": ""
+}
+```
+
+
+### 9. 机器人设置事件
+
+
+原始事件:
+```json
+{
+  "version": "1.0",
+  "header": {
+    "eventId": "1d66a0c0132e4519a4063276485d24bd",
+    "eventType": "bot.setting",
+    "eventTime": 1752471938486
+  },
+  "event": {
+    "time": 1752471938483,
+    "chatId": "30535459",
+    "chatType": "bot",
+    "groupId": "635409929",
+    "groupName": "ErisPulse",
+    "avatarUrl": "https://chat-img.jwznb.com/cd0ea50d0e21eab0ddb67505cd274dc3.jpg",
+    "settingJson": "{\"lokola\":{\"id\":\"lokola\",\"type\":\"radio\",\"label\":null,\"selectIndex\":-1,\"selectValue\":\"\"},\"ngcezg\":{\"id\":\"ngcezg\",\"type\":\"input\",\"label\":null,\"value\":null},\"bvxrzf\":{\"id\":\"bvxrzf\",\"type\":\"switch\",\"label\":null,\"value\":false},\"fzgsya\":{\"id\":\"fzgsya\",\"type\":\"checkbox\",\"label\":null,\"selectStatus\":[false],\"selectValues\":[]},\"ljmgbp\":{\"id\":\"ljmgbp\",\"type\":\"textarea\",\"label\":null,\"value\":\"\"},\"azyfwy\":{\"id\":\"azyfwy\",\"type\":\"select\",\"label\":null,\"selectIndex\":0,\"selectValue\":\"\"}}"
+  }
+}
+```
+转换后
+```json
+{
+  "id": "1d66a0c0132e4519a4063276485d24bd",
+  "time": 1752471938,
+  "type": "notice",
+  "detail_type": "yunhu_bot_setting",
+  "sub_type": "",
+  "platform": "yunhu",
+  "self": {
+    "platform": "yunhu",
+    "user_id": "30535459"
+  },
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "group_id": "635409929",
+  "yunhu_setting": "{\"lokola\":{\"id\":\"lokola\",\"type\":\"radio\",\"label\":null,\"selectIndex\":-1,\"selectValue\":\"\"},\"ngcezg\":{\"id\":\"ngcezg\",\"type\":\"input\",\"label\":null,\"value\":null},\"bvxrzf\":{\"id\":\"bvxrzf\",\"type\":\"switch\",\"label\":null,\"value\":false},\"fzgsya\":{\"id\":\"fzgsya\",\"type\":\"checkbox\",\"label\":null,\"selectStatus\":[false],\"selectValues\":[]},\"ljmgbp\":{\"id\":\"ljmgbp\",\"type\":\"textarea\",\"label\":null,\"value\":\"\"},\"azyfwy\":{\"id\":\"azyfwy\",\"type\":\"select\",\"label\":null,\"selectIndex\":0,\"selectValue\":\"\"}}"
+}
+```
+
+### 10. 快捷菜单事件
+
+原始事件:
+```json
+{
+  "version": "1.0",
+  "header": {
+    "eventId": "e43bf93f28ee42bdbb5b8d4d6120d79a",
+    "eventType": "bot.shortcut.menu",
+    "eventTime": 1752472004836
+  },
+  "event": {
+    "botId": "30535459",
+    "menuId": "B4X00M5B",
+    "menuType": 1,
+    "menuAction": 1,
+    "chatId": "853732258",
+    "chatType": "group",
+    "senderType": "user",
+    "senderId": "5197892",
+    "sendTime": 1752472004
+  }
+}
+```
+转换后
+```json
+{
+  "id": "e43bf93f28ee42bdbb5b8d4d6120d79a",
+  "time": 1752472004,
+  "type": "notice",
+  "detail_type": "yunhu_shortcut_menu",
+  "sub_type": "",
+  "platform": "yunhu",
+  "self": {
+    "platform": "yunhu",
+    "user_id": ""
+  },
+  "yunhu_raw": {
+    ... # 省略，原始事件内容
+  },
+  "user_id": "5197892",
+  "group_id": "853732258",
+  "yunhu_menu": {
+    "id": "B4X00M5B",
+    "type": 1,
+    "action": 1
+  }
 }
 ```

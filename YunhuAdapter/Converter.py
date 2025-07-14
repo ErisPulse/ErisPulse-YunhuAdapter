@@ -214,7 +214,7 @@ class YunhuConverter:
         })
         return base_event
 
-    def _handle_button_event(self, event_data: Dict, base_event: Dict) -> Dict:
+    def _handle_button_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理按钮点击事件
         """
@@ -234,7 +234,7 @@ class YunhuConverter:
         })
         return base_event
 
-    def _handle_menu_event(self, event_data: Dict, base_event: Dict) -> Dict:
+    def _handle_menu_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理快捷菜单事件
         """
@@ -255,7 +255,7 @@ class YunhuConverter:
         })
         return base_event
 
-    def _handle_setting_event(self, event_data: Dict, base_event: Dict) -> Dict:
+    def _handle_setting_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
         """
         处理机器人设置事件
         """
