@@ -435,8 +435,41 @@ class YunhuAdapter(sdk.BaseAdapter):
             return await response.json()
 
     async def call_api(self, endpoint: str, **params):
-        self.logger.debug(f"调用API:{endpoint}")
-        return await self._net_request("POST", endpoint, params)
+        self.logger.debug(f"调用API:{endpoint} 参数:{params}")
+        
+        raw_response = await self._net_request("POST", endpoint, params)
+        
+        is_batch = "batch" in endpoint or isinstance(params.get('recvIds'), list)
+        
+        standardized = {
+            "status": "ok" if raw_response.get("code") == 1 else "failed",
+            "retcode": 0 if raw_response.get("code") == 1 else 34000 + (raw_response.get("code") or 0),
+            "data": raw_response.get("data"),
+            "message": raw_response.get("msg", ""),
+            "yunhu_raw": raw_response
+        }
+        
+        if raw_response.get("code") == 1:
+            if is_batch:
+                standardized["message_id"] = [
+                    msg.get("msgId", "") 
+                    for msg in raw_response.get("data", {}).get("successList", []) 
+                    if isinstance(msg, dict) and msg.get("msgId")
+                ] if "successList" in raw_response.get("data", {}) else []
+            else:
+                data = raw_response.get("data", {})
+                standardized["message_id"] = (
+                    data.get("messageInfo", {}).get("msgId", "") 
+                    if "messageInfo" in data 
+                    else data.get("msgId", "")
+                )
+        else:
+            standardized["message_id"] = [] if is_batch else ""
+        
+        if "echo" in params:
+            standardized["echo"] = params["echo"]
+        
+        return standardized
     
     async def _process_webhook_event(self, data: Dict):
         try:
