@@ -68,6 +68,8 @@ class YunhuConverter:
                 "platform": "yunhu",
                 "user_id": ""
             },
+            # 基础字段：用户昵称
+            "user_nickname": "",
             # 扩展字段：保留原始数据
             "yunhu_raw": data
         }
@@ -162,7 +164,8 @@ class YunhuConverter:
             "message_id": msg_data.get("msgId", ""),
             "message": message_segments,
             "alt_message": "".join(alt_message),
-            "user_id": sender.get("senderId", "")
+            "user_id": sender.get("senderId", ""),
+            "user_nickname": sender.get("senderNickname", "")
         })
 
         # 设置群聊ID或机器人ID
@@ -190,6 +193,7 @@ class YunhuConverter:
             "type": "notice",
             "detail_type": "friend_increase" if event_type == "bot.followed" else "friend_decrease",
             "user_id": event_data.get("userId", ""),
+            "user_nickname": event_data.get("nickname", ""),
             "self": {
                 "platform": "yunhu",
                 "user_id": event_data.get("chatId", "")
@@ -206,6 +210,7 @@ class YunhuConverter:
             "sub_type": "invite" if event_type == "group.join" else "leave",
             "group_id": event_data.get("chatId", ""),
             "user_id": event_data.get("userId", ""),
+            "user_nickname": event_data.get("nickname", ""),
             "operator_id": "",
             "self": {
                 "platform": "yunhu",
@@ -222,6 +227,7 @@ class YunhuConverter:
             "type": "notice",
             "detail_type": "yunhu_button_click",
             "user_id": event_data.get("userId", ""),
+            "user_nickname": event_data.get("nickname", ""),
             "message_id": event_data.get("msgId", ""),
             "yunhu_button": {
                 "id": event_data.get("buttonId", ""),
@@ -242,6 +248,7 @@ class YunhuConverter:
             "type": "notice",
             "detail_type": "yunhu_shortcut_menu",
             "user_id": event_data.get("senderId", ""),
+            "user_nickname": event_data.get("nickname", ""),
             "group_id": event_data.get("chatId", "") if event_data.get("chatType") == "group" else "",
             "yunhu_menu": {
                 "id": event_data.get("menuId", ""),
@@ -263,6 +270,7 @@ class YunhuConverter:
             "type": "notice",
             "detail_type": "yunhu_bot_setting",
             "group_id": event_data.get("groupId", ""),
+            "user_nickname": event_data.get("nickname", ""),
             "yunhu_setting": event_data.get("settingJson", {}),
             "self": {
                 "platform": "yunhu",
@@ -353,5 +361,4 @@ class YunhuConverter:
         if content_type == "form":
             command_data["form"] = content.get("formJson", {})
         
-        return command_data
     

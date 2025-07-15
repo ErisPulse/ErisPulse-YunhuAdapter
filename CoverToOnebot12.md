@@ -67,6 +67,7 @@
   ],
   "alt_message": "1",
   "user_id": "5197892",
+  "user_nickname": "YingXinche",
   "group_id": "853732258"
 }
 ```
@@ -146,6 +147,7 @@
   ],
   "alt_message": "[图片:b035eeac93d31ec33cb5a106cdf10d07.png]",
   "user_id": "5197892",
+  "user_nickname": "YingXinche",
   "group_id": "853732258"
 }
 ```
@@ -224,6 +226,7 @@
   ],
   "alt_message": "[视频:]",
   "user_id": "5197892",
+  "user_nickname": "YingXinche",
   "group_id": "853732258"
 }
 ```
@@ -301,6 +304,7 @@
   ],
   "alt_message": "[文件:cline_task_jun-5-2025_9-33-00-pm.md]",
   "user_id": "5197892",
+  "user_nickname": "YingXinche",
   "group_id": "853732258"
 }
 ```
@@ -453,6 +457,7 @@
   ],
   "alt_message": "[表单:123123]",
   "user_id": "2129537",
+  "user_nickname": "北医六院精神科",
   "yunhu_command": {
     "name": "123123",
     "id": "1766",
@@ -542,6 +547,7 @@
     ... # 省略，原始事件内容
   },
   "user_id": "5197892",
+  "user_nickname": "YingXinche",
   "message_id": "168da7860ce040efa346bcbf54c1f45e",
   "yunhu_button": {
     "id": "",
@@ -587,7 +593,8 @@
   "yunhu_raw": {
     ... # 省略，原始事件内容
   },
-  "user_id": "2129537"
+  "user_id": "2129537",
+  "user_nickname": "北医六院精神科"
 }
 ```
 
@@ -630,6 +637,7 @@
   },
   "group_id": "635409929",
   "user_id": "2129537",
+  "user_nickname": "北医六院精神科",
   "operator_id": ""
 }
 ```
@@ -675,6 +683,7 @@
     ... # 省略，原始事件内容
   },
   "group_id": "635409929",
+  "user_nickname": "北医六院精神科",
   "yunhu_setting": "{\"lokola\":{\"id\":\"lokola\",\"type\":\"radio\",\"label\":null,\"selectIndex\":-1,\"selectValue\":\"\"},\"ngcezg\":{\"id\":\"ngcezg\",\"type\":\"input\",\"label\":null,\"value\":null},\"bvxrzf\":{\"id\":\"bvxrzf\",\"type\":\"switch\",\"label\":null,\"value\":false},\"fzgsya\":{\"id\":\"fzgsya\",\"type\":\"checkbox\",\"label\":null,\"selectStatus\":[false],\"selectValues\":[]},\"ljmgbp\":{\"id\":\"ljmgbp\",\"type\":\"textarea\",\"label\":null,\"value\":\"\"},\"azyfwy\":{\"id\":\"azyfwy\",\"type\":\"select\",\"label\":null,\"selectIndex\":0,\"selectValue\":\"\"}}"
 }
 ```
@@ -720,6 +729,7 @@
     ... # 省略，原始事件内容
   },
   "user_id": "5197892",
+  "user_nickname": "YingXinche",
   "group_id": "853732258",
   "yunhu_menu": {
     "id": "B4X00M5B",
