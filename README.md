@@ -16,6 +16,7 @@ YunhuAdapter 是基于 [ErisPulse](https://github.com/ErisPulse/ErisPulse/) 架�
 | group.leave | group_leave |
 | button.report.inline | button_click |
 | bot.shortcut.menu | shortcut_menu |
+
 这仅仅在 sdk.adapter.yunhu.on() 的时候生效，你完全可以使用 标准OneBot12 事件（sdk.adapter.on）来获取信息
 
 ---
