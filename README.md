@@ -5,7 +5,7 @@ YunhuAdapter 是基于 [ErisPulse](https://github.com/ErisPulse/ErisPulse/) 架�
 
 ## 使用示例
 
-### 事件映射关系
+### 平台原生事件映射关系
 | 官方事件命名 | Adapter事件命名 |
 |--------------|----------------|
 | message.receive.normal | message |
@@ -16,94 +16,7 @@ YunhuAdapter 是基于 [ErisPulse](https://github.com/ErisPulse/ErisPulse/) 架�
 | group.leave | group_leave |
 | button.report.inline | button_click |
 | bot.shortcut.menu | shortcut_menu |
-
-### 官方事件内容示例
-```json
-{
-    "version": "1.0",
-    "header": {
-        "eventId": "xxxxx",
-        "eventTime": 1647735644000,
-        "eventType": "message.receive.instruction"
-    },
-    "event": {
-        "sender": {
-            "senderId": "xxxxx",
-            "senderType": "user",
-            "senderUserLevel": "member",
-            "senderNickname": "昵称"
-        },
-        "chat": {
-            "chatId": "xxxxx",
-            "chatType": "group"
-        },
-        "message": {
-            "msgId": "xxxxxx",
-            "parentId": "xxxx",
-            "sendTime": 1647735644000,
-            "chatId": "xxxxxxxx",
-            "chatType": "group",
-            "contentType": "text",
-            "content": {
-                "text": "早上好"
-            },
-            "commandId": 98,
-            "commandName": "计算器"
-        }
-    }
-}
-```
-
-### 初始化与事件处理
-```python
-from ErisPulse import sdk
-
-async def main():
-    # 初始化 SDK
-    sdk.init()
-
-    # 获取适配器实例
-    yunhu = sdk.adapter.Yunhu
-
-    # 注册事件处理器
-    @yunhu.on("message")
-    async def handle_message(data):
-        """处理普通消息事件"""
-        sender = data["event"]["sender"]["senderId"]
-        message = data["event"]["message"]["content"]["text"]
-        print(f"收到消息: {message}")
-        await yunhu.Send.To("user", sender).Text(f"已收到消息: {message}")
-
-    @yunhu.on("command")
-    async def handle_command(data):
-        """处理指令事件"""
-        command_info = data["event"]["message"]
-        sender_id = data["event"]["sender"]["senderId"]
-        command_name = command_info["commandName"]
-        
-        print(f"收到指令: {command_name}, 参数: {command_args}")
-        
-        if command_name == "计算器":
-            await yunhu.Send.To("user", sender_id).Text(f"计算结果: 114514")
-        else:
-            await yunhu.Send.To("user", sender_id).Text(f"未知指令: {command_name}")
-
-    @yunhu.on("follow")
-    async def handle_follow(data):
-        print(f"新关注: {data}")
-        user_id = data["event"]["sender"]["senderId"]
-        await yunhu.Send.To("user", user_id).Text("感谢关注！")
-
-    # 启动适配器
-    await sdk.adapter.startup()
-
-    # 保持程序运行
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
-```
+这仅仅在 sdk.adapter.yunhu.on() 的时候生效，你完全可以使用 标准OneBot12 事件（sdk.adapter.on）来获取信息
 
 ---
 
@@ -159,23 +72,8 @@ await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
 ---
 
 ### 配置说明
+首次运行会生成配置，内容及解释如下
 
-在 env.py 中进行如下配置：
-
-```python
-sdk.env.set("YunhuAdapter", {
-    "token": "your_bot_token",
-    "mode": "server",  # 可选: server 或 polling
-    "server": {
-        "host": "0.0.0.0",      # Webhook 监听地址
-        "port": 25888,          # Webhook 监听端口
-        "path": "/yunhu/webhook" # Webhook 路径
-    },
-    "polling": {
-        "url": "https://sse.bot.anran.xyz/sse"  # SSE 轮询地址（polling 模式）
-    }
-})
-```
 
 ---
 
