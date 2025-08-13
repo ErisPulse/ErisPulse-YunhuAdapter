@@ -176,13 +176,19 @@ class YunhuConverter:
         
         # 处理指令消息 (云湖扩展)
         if "receive.instruction" in event_type:
-            if "receive.instruction" in event_type:
-                command_data = self._build_command_data(
-                    content=msg_data.get("content", {}),
-                    message_event=msg_data,
-                    content_type=content_type
-                )
+            command_data = self._build_command_data(
+                content=msg_data.get("content", {}),
+                message_event=msg_data,
+                content_type=content_type
+            )
             base_event["yunhu_command"] = command_data
+            
+            # 更新alt_message以包含完整指令格式
+            if command_data and content_type == "text":
+                command_name = command_data.get("name", "")
+                args = command_data.get("args", "")
+                if command_name:
+                    base_event["alt_message"] = f"/{command_name} {args}".strip()
         
         return base_event
     def _handle_friend_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
