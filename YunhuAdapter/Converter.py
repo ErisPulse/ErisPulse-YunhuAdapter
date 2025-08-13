@@ -9,6 +9,7 @@
 
 import time
 import uuid
+from ErisPulse.Core import logger
 from typing import Dict, Optional, List
 
 class YunhuConverter:
@@ -181,6 +182,7 @@ class YunhuConverter:
                 message_event=msg_data,
                 content_type=content_type
             )
+            logger.debug(f"Received command: {command_data}")
             base_event["yunhu_command"] = command_data
             
             # 更新alt_message以包含完整指令格式
@@ -367,4 +369,4 @@ class YunhuConverter:
         if content_type == "form":
             command_data["form"] = content.get("formJson", {})
         
-    
+        return command_data
