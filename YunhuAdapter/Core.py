@@ -6,7 +6,7 @@ import json
 from typing import Dict, List, Optional, Any, AsyncGenerator
 import filetype
 from ErisPulse import sdk
-from ErisPulse.Core import adapter_server  # 导入统一适配器服务器系统
+from ErisPulse.Core import router  # 导入统一适配器服务器系统
 
 class YunhuAdapter(sdk.BaseAdapter):
     """
@@ -218,24 +218,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        async def CheckExist(self, message_id: str):
-            endpoint = "/bot/messages"
-            params = {
-                "chat-id": self._target_id,
-                "chat-type": self._target_type,
-                "message-id": message_id,
-                "before": 0,
-                "after": 0
-            }
-            url = f"{self._adapter.base_url}{endpoint}?token={self._adapter.yhToken}"
-            async with self._adapter.session.get(url, params=params) as response:
-                data = await response.json()
-                if data.get("code") != 1:
-                    self.logger.warning(f"云湖API返回异常: {data}")
-                    return False
-                msg_list = data.get("data", {}).get("list", [])
-                return any(msg["msgId"] == message_id for msg in msg_list)
-
         def _detect_document(self, sample_bytes):
             office_signatures = {
                 b'PK\x03\x04\x14\x00\x06\x00': 'docx',  # DOCX
@@ -359,7 +341,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         return convert.convert
 
     def _load_config(self) -> Dict:
-        config = self.sdk.env.getConfig("Yunhu_Adapter")
+        config = self.sdk.config.get("Yunhu_Adapter", {})
         if not config:
             default_config = {
                 "token": "",
@@ -369,7 +351,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             }
             try:
                 sdk.logger.warning("云湖适配器配置不存在，已自动创建默认配置")
-                self.sdk.env.setConfig("Yunhu_Adapter", default_config)
+                self.sdk.config.set("Yunhu_Adapter", default_config)
                 return default_config
             except Exception as e:
                 self.logger.error(f"保存默认配置失败: {str(e)}")
@@ -377,6 +359,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         return config
 
     def _setup_event_mapping(self):
+        # 映射后的事件名（用于兼容性）
         self.event_map = {
             "message.receive.normal": "message",
             "message.receive.instruction": "command",
@@ -480,12 +463,16 @@ class YunhuAdapter(sdk.BaseAdapter):
                 raise ValueError("无效的事件数据结构")
 
             event_type = data["header"]["eventType"]
+            
+            # 发送平台原始事件名
+            await self.emit(event_type, data)
+            
+            # 发送映射后的事件名（用于向后兼容）
             mapped_type = self.event_map.get(event_type, "unknown")
-
-            self.logger.debug(f"事件 {event_type} -> {mapped_type}")
+            if mapped_type != "unknown":
+                await self.emit(mapped_type, data)
             
-            await self.emit(mapped_type, data)
-            
+            # 转换为 OneBot12 标准事件并发送
             if hasattr(self.adapter, "emit"):
                 onebot_event = self.convert(data)
                 self.logger.debug(f"OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}")
@@ -504,9 +491,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         server_config = self.config["server"]
         path = server_config.get("path", "/webhook")
         
-
-        # 注册到统一服务器系统
-        adapter_server.register_webhook(
+        router.register_http_route(
             "yunhu",
             path,
             self._process_webhook_event,

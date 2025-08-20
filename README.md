@@ -17,7 +17,22 @@ YunhuAdapter 是基于 [ErisPulse](https://github.com/ErisPulse/ErisPulse/) 架�
 | button.report.inline | button_click |
 | bot.shortcut.menu | shortcut_menu |
 
-这仅仅在 sdk.adapter.yunhu.on() 的时候生效，你完全可以使用 标准OneBot12 事件（sdk.adapter.on）来获取信息
+这仅仅在 `sdk.adapter.yunhu.on()` 的时候生效，你完全可以使用标准OneBot12事件（`sdk.adapter.on`）来获取信息。
+
+### OneBot12标准事件类型
+
+云湖适配器完全兼容 OneBot12 标准事件格式，并提供了一些扩展字段：
+
+| 事件类型 | detail_type | 说明 |
+|----------|-------------|------|
+| 消息事件 | message | 标准消息事件 |
+| 好友增加 | notice.friend_increase | 用户关注机器人 |
+| 好友减少 | notice.friend_decrease | 用户取消关注机器人 |
+| 群成员增加 | notice.group_member_increase | 用户加入群组 |
+| 群成员减少 | notice.group_member_decrease | 用户离开群组 |
+| 云湖按钮点击 | notice.yunhu_button_click | 用户点击按钮 |
+| 云湖快捷菜单 | notice.yunhu_shortcut_menu | 用户点击快捷菜单 |
+| 云湖机器人设置 | notice.yunhu_bot_setting | 机器人设置变更 |
 
 ---
 
@@ -48,7 +63,7 @@ await yunhu.Send.To("group", "group456").Html("<b>加粗</b>消息")
 # 发送 Markdown 格式消息
 await yunhu.Send.To("user", "user123").Markdown("# 标题\n- 列表项")
 
-# 批量发送消息 （过时的）
+# 批量发送消息
 # 该方法批量发送文本/富文本消息时, 更推荐的方法是使用: 
 #   Send.To('user'/'group', user_ids: list/group_ids: list).Text/Html/Markdown(message, buttons = None, parent_id = None)
 await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
@@ -69,12 +84,23 @@ async def stream_generator():
 
 await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
 ```
+
 > Text/Html/Markdown 的发送支持使用list传入多个id进行批量发送 | 而不再推荐使用 await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
+
 ---
 
 ### 配置说明
-首次运行会生成配置，内容及解释如下
 
+首次运行会生成配置，内容及解释如下：
+
+```toml
+# config.toml
+[Yunhu_Adapter]
+token = "your_yunhu_token"
+
+[Yunhu_Adapter.server]
+path = "/webhook"
+```
 
 ---
 
@@ -91,35 +117,74 @@ await yunhu.Send.To("user", "user123").Board("local", "指定用户看板")
 await yunhu.Send.To("user", "user123").DismissBoard("local" / "global")
 ```
 
-## 新特性
+## 云湖平台特有功能
 
-#### 2.6.0
-##### File/Image/Video 已支持流式上传模式
+请参考 [云湖平台特性文档](platform-features/yunhu.md) 了解云湖平台的特有功能，包括特有消息段类型、扩展字段说明、表单消息事件、按钮点击事件、机器人设置事件和快捷菜单事件等内容。
+
+## 事件监听示例
+
+### 使用 Event 模块（推荐）
+
 ```python
-async def generate_file():
-    with open('large_file.mp4', 'rb') as f:
-        while chunk := f.read(1024*1024):
-            yield chunk
-            await asyncio.sleep(0.1)
+from ErisPulse.Core.Event import message, notice, command
 
-await yunhu.Send.Video(generate_file(), stream=True)
+@message.on_message()
+async def handle_message(event):
+    if event["platform"] == "yunhu":
+        # 处理云湖消息事件
+        pass
+
+@notice.on_notice()
+async def handle_notice(event):
+    if event["platform"] == "yunhu":
+        # 处理云湖通知事件
+        pass
+
+@command("test", help="测试命令")
+async def handle_command(event):
+    if event["platform"] == "yunhu":
+        # 处理云湖命令事件
+        pass
 ```
-#### 2.7.0
-编辑消息支持传入按钮
-上传文件时可以传入文件名（包括流式）
 
-#### 2.8.0
-添加 ErisPulse 2.0.0 对于OneBot12协议对转的兼容
+### 使用平台原生事件
 
-### 参数说明
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| file | bytes/AsyncGenerator | 文件内容或异步生成器 |
-| stream | bool | 是否使用流式模式(默认False) |
-| parent_id | str | 父消息ID(可选) |
+```python
+yunhu = sdk.adapter.get("yunhu")
 
+# 使用平台原始事件名
+@yunhu.on("message.receive.normal")
+async def handle_normal_message(data):
+    pass
 
-### 注意事项：
+# 或使用映射后的事件名（向后兼容）
+@yunhu.on("message")
+async def handle_message(data):
+    pass
+
+@yunhu.on("button.report.inline")
+async def handle_button(data):
+    # 处理按钮点击事件
+    pass
+```
+
+### 使用 OneBot12 标准事件
+
+```python
+@sdk.adapter.on("message")
+async def handle_message(event):
+    if event["platform"] == "yunhu":
+        # 处理云湖消息事件
+        pass
+
+@sdk.adapter.on("notice")
+async def handle_notice(event):
+    if event["platform"] == "yunhu":
+        # 处理云湖通知事件
+        pass
+```
+
+## 注意事项：
 
 1. 确保在调用 `startup()` 前完成所有处理器的注册
 2. 生产环境建议配置服务器反向代理指向 webhook 地址以实现 HTTPS
