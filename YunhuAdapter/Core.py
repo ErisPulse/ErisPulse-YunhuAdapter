@@ -341,7 +341,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         return convert.convert
 
     def _load_config(self) -> Dict:
-        config = self.sdk.config.get("Yunhu_Adapter", {})
+        config = self.sdk.config.getConfig("Yunhu_Adapter", {})
         if not config:
             default_config = {
                 "token": "",
@@ -351,7 +351,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             }
             try:
                 sdk.logger.warning("云湖适配器配置不存在，已自动创建默认配置")
-                self.sdk.config.set("Yunhu_Adapter", default_config)
+                self.sdk.config.setConfig("Yunhu_Adapter", default_config)
                 return default_config
             except Exception as e:
                 self.logger.error(f"保存默认配置失败: {str(e)}")
