@@ -39,23 +39,30 @@ YunhuAdapter 是基于 [ErisPulse](https://github.com/ErisPulse/ErisPulse/) 架�
 ## 消息发送示例
 
 ```python
-# 发送文本消息
-await yunhu.Send.To("user", "user123").Text("Hello World!")
+# 发送文本消息（带按钮和父消息ID）
+buttons = [[{"text": "点击", "actionType": 3, "value": "clicked"}]]
+await yunhu.Send.To("user", "user123").Text("Hello World!", buttons=buttons, parent_id="parent_msg_id")
 
-# 发送图片（需先读取为 bytes）
+# 发送图片（支持自定义文件名）
 with open("image.png", "rb") as f:
     image_data = f.read()
-await yunhu.Send.To("user", "user123").Image(image_data)
+await yunhu.Send.To("user", "user123").Image(image_data, filename="my_image.png")
 
-# 发送视频（需先读取为 bytes）
-with open("video.mp4", "rb") as f:
-    video_data = f.read()
-await yunhu.Send.To("group", "group456").Video(video_data)
+# 发送视频（支持流式上传）
+async def video_generator():
+    with open("video.mp4", "rb") as f:
+        while chunk := f.read(8192):
+            yield chunk
 
-# 发送文件（需先读取为 bytes）
-with open("file.txt", "rb") as f:
-    file_data = f.read()
-await yunhu.Send.To("group", "group456").File(file_data)
+await yunhu.Send.To("group", "group456").Video(video_generator(), stream=True)
+
+# 发送文件（支持自定义文件名和流式上传）
+async def file_generator():
+    with open("document.pdf", "rb") as f:
+        while chunk := f.read(8192):
+            yield chunk
+
+await yunhu.Send.To("group", "group456").File(file_generator(), filename="文档.pdf", stream=True)
 
 # 发送富文本 (HTML)
 await yunhu.Send.To("group", "group456").Html("<b>加粗</b>消息")
@@ -63,29 +70,34 @@ await yunhu.Send.To("group", "group456").Html("<b>加粗</b>消息")
 # 发送 Markdown 格式消息
 await yunhu.Send.To("user", "user123").Markdown("# 标题\n- 列表项")
 
-# 批量发送消息
-# 该方法批量发送文本/富文本消息时, 更推荐的方法是使用: 
-#   Send.To('user'/'group', user_ids: list/group_ids: list).Text/Html/Markdown(message, buttons = None, parent_id = None)
-await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
+# 批量发送消息（指定内容类型）
+await yunhu.Send.To("user", ["user1", "user2"]).Batch(["user1", "user2"], "批量通知", content_type="text")
 
-# 编辑已有消息
-# 可以在编辑时添加按钮
-# Send.To('user'/'group', user_ids: list/group_ids: list).Edit(message_id, message, buttons = None)
-await yunhu.Send.To("user", "user123").Edit("msg_abc123", "修改后的内容")
+# 编辑已有消息（指定内容类型）
+await yunhu.Send.To("user", "user123").Edit("msg_abc123", "修改后的内容", content_type="text")
 
 # 撤回消息
 await yunhu.Send.To("group", "group456").Recall("msg_abc123")
 
-# 流式消息传输
+# 发送流式消息
 async def stream_generator():
     for i in range(5):
         yield f"这是第 {i+1} 段内容\n".encode("utf-8")
         await asyncio.sleep(1)
 
 await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
+
+# 发布全局公告（带过期时间）
+await yunhu.Send.Board("global", "重要公告", expire_time=86400)
+
+# 发布群组公告（指定成员）
+await yunhu.Send.To("user", "user123").Board("local", "指定用户看板", member_id="member123")
+
+# 撤销公告（指定群组）
+await yunhu.Send.To("group", "group456").DismissBoard("local", chat_id="group456", chat_type="group")
 ```
 
-> Text/Html/Markdown 的发送支持使用list传入多个id进行批量发送 | 而不再推荐使用 await yunhu.Send.To("users", ["user1", "user2"]).Batch("批量通知")
+> Text/Html/Markdown 的发送支持使用list传入多个id进行批量发送 | 而不再推荐使用 await yunhu.Send.To("user", ["user1", "user2"]).Batch("批量通知")
 
 ---
 
@@ -103,19 +115,6 @@ path = "/webhook"
 ```
 
 ---
-
-### 公告看板管理
-
-```python
-# 发布全局公告
-await yunhu.Send.To("user", "user123").Board("global", "重要公告", expire_time=86400)
-
-# 发布群组公告
-await yunhu.Send.To("user", "user123").Board("local", "指定用户看板")
-
-# 撤销公告
-await yunhu.Send.To("user", "user123").DismissBoard("local" / "global")
-```
 
 ## 云湖平台特有功能
 

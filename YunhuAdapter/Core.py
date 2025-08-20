@@ -399,6 +399,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                 return {"error": "Invalid content type", "content_type": content_type, "status": response.status, "raw": text}
 
     async def send_stream(self, conversation_type: str, target_id: str, content_type: str, content_generator, **kwargs) -> Dict:
+        """
+        发送流式消息并返回标准 OneBot12 响应格式
+        """
         endpoint = "/bot/send-stream"
         params = {
             "recvId": target_id,
@@ -415,7 +418,32 @@ class YunhuAdapter(sdk.BaseAdapter):
             self.session = aiohttp.ClientSession()
         headers = {"Content-Type": "text/plain"}
         async with self.session.post(full_url, headers=headers, data=content_generator) as response:
-            return await response.json()
+            raw_response = await response.json()
+            
+            # 标准化为 OneBot12 响应格式
+            standardized = {
+                "status": "ok" if raw_response.get("code") == 1 else "failed",
+                "retcode": 0 if raw_response.get("code") == 1 else 34000 + (raw_response.get("code") or 0),
+                "data": raw_response.get("data"),
+                "message": raw_response.get("msg", ""),
+                "yunhu_raw": raw_response
+            }
+            
+            # 如果成功，提取消息ID
+            if raw_response.get("code") == 1:
+                data = raw_response.get("data", {})
+                standardized["message_id"] = (
+                    data.get("messageInfo", {}).get("msgId", "") 
+                    if "messageInfo" in data 
+                    else data.get("msgId", "")
+                )
+            else:
+                standardized["message_id"] = ""
+                
+            if "echo" in kwargs:
+                standardized["echo"] = kwargs["echo"]
+                
+            return standardized
 
     async def call_api(self, endpoint: str, **params):
         self.logger.debug(f"调用API:{endpoint} 参数:{params}")
