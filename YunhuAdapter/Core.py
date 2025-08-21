@@ -1,12 +1,11 @@
 import asyncio
 import aiohttp
 import io
-from urllib.parse import quote
 import json
-from typing import Dict, List, Optional, Any, AsyncGenerator
+from typing import Dict, List, Optional, Any
 import filetype
 from ErisPulse import sdk
-from ErisPulse.Core import router  # 导入统一适配器服务器系统
+from ErisPulse.Core import router
 
 class YunhuAdapter(sdk.BaseAdapter):
     """
@@ -331,7 +330,6 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.yhToken = self.config.get("token", "")
         self.session: Optional[aiohttp.ClientSession] = None
         self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
-        self._setup_event_mapping()
         
         self.convert = self._setup_coverter()
 
@@ -357,20 +355,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self.logger.error(f"保存默认配置失败: {str(e)}")
                 return default_config
         return config
-
-    def _setup_event_mapping(self):
-        # 映射后的事件名（用于兼容性）
-        self.event_map = {
-            "message.receive.normal": "message",
-            "message.receive.instruction": "command",
-            "bot.followed": "follow",
-            "bot.unfollowed": "unfollow",
-            "group.join": "group_join",
-            "group.leave": "group_leave",
-            "button.report.inline": "button_click",
-            "bot.shortcut.menu": "shortcut_menu"
-        }
-
+    
     async def _net_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None) -> Dict:
         url = f"{self.base_url}{endpoint}?token={self.yhToken}"
         if not self.session:
@@ -489,18 +474,7 @@ class YunhuAdapter(sdk.BaseAdapter):
 
             if "header" not in data or "eventType" not in data["header"]:
                 raise ValueError("无效的事件数据结构")
-
-            event_type = data["header"]["eventType"]
             
-            # 发送平台原始事件名
-            await self.emit(event_type, data)
-            
-            # 发送映射后的事件名（用于向后兼容）
-            mapped_type = self.event_map.get(event_type, "unknown")
-            if mapped_type != "unknown":
-                await self.emit(mapped_type, data)
-            
-            # 转换为 OneBot12 标准事件并发送
             if hasattr(self.adapter, "emit"):
                 onebot_event = self.convert(data)
                 self.logger.debug(f"OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}")

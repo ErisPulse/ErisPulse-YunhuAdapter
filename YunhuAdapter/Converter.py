@@ -39,12 +39,6 @@ class YunhuConverter:
         """
         主转换方法
         
-        改进点：
-        1. 严格分离标准字段和扩展字段
-        2. 使用OneBot12标准的事件类型格式
-        3. 明确区分detail_type和sub_type
-        4. 所有非标准字段添加yunhu_前缀
-        
         :param data: 原始事件数据
         :return: 符合OneBot12标准的事件字典
         """
@@ -56,8 +50,7 @@ class YunhuConverter:
 
         if not event_type:
             raise ValueError("事件数据缺少eventType字段")
-
-        # 基础事件结构 (OneBot12标准)
+        
         onebot_event = {
             "id": header.get("eventId", str(uuid.uuid4())),
             "time": int(header.get("eventTime", time.time() * 1000) / 1000),
@@ -71,11 +64,11 @@ class YunhuConverter:
             },
             # 基础字段：用户昵称
             "user_nickname": "",
-            # 扩展字段：保留原始数据
-            "yunhu_raw": data
+            # 扩展字段：保留原始数据和原始事件类型
+            "yunhu_raw": data,
+            "yunhu_raw_type": event_type
         }
 
-        # 解析映射类型 (type.detail_type格式)
         mapped_type = self.event_map.get(event_type, "")
         if "." in mapped_type:
             event_type_parts = mapped_type.split(".")
