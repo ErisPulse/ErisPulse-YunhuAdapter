@@ -10,7 +10,7 @@
 import time
 import uuid
 from ErisPulse.Core import logger
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 class YunhuConverter:
     def __init__(self):
