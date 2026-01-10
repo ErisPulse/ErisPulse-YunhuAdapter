@@ -1,9 +1,9 @@
 [project]
 name = "ErisPulse-YunhuAdapter"
-version = "3.4.0"
+version = "3.5.0"
 description = "ErisPulse的云湖协议适配模块"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [ { name = "wsu2059", email = "wsu2059@qq.com" } ]
 dependencies = [
@@ -17,3 +17,10 @@ dependencies = [
 [project.entry-points."erispulse.adapter"]
 yunhu = "YunhuAdapter:YunhuAdapter"
 yh = "YunhuAdapter:YunhuAdapter"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["YunhuAdapter"]

@@ -3,9 +3,19 @@ import aiohttp
 import io
 import json
 from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 import filetype
 from ErisPulse import sdk
 from ErisPulse.Core import router
+
+@dataclass
+class YunhuBotConfig:
+    """云湖机器人账户配置"""
+    bot_id: str  # 机器人ID（必填）
+    token: str  # 机器人token
+    webhook_path: str = "/webhook"  # Webhook路径
+    enabled: bool = True  # 是否启用
+    name: str = ""  # 账户名称
 
 class YunhuAdapter(sdk.BaseAdapter):
     """
@@ -230,7 +240,22 @@ class YunhuAdapter(sdk.BaseAdapter):
             return None
 
         async def _upload_file_and_call_api(self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs):
-            url = f"{self._adapter.base_url}{upload_endpoint}?token={self._adapter.yhToken}"
+            # 确定使用的bot
+            bot_name = self._account_id
+            bot = None
+            if bot_name and bot_name in self._adapter.bots:
+                bot = self._adapter.bots[bot_name]
+                if not bot.enabled:
+                    raise ValueError(f"Bot {bot_name} 已禁用")
+            else:
+                # 使用第一个启用的bot
+                enabled_bots = [b for b in self._adapter.bots.values() if b.enabled]
+                if not enabled_bots:
+                    raise ValueError("没有配置任何启用的机器人")
+                bot = enabled_bots[0]
+                bot_name = next((name for name, b in self._adapter.bots.items() if b == bot), "")
+            
+            url = f"{self._adapter.base_url}{upload_endpoint}?token={bot.token}"
             
             # 使用不编码字段名的FormData
             data = aiohttp.FormData(quote_fields=False)
@@ -293,7 +318,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self._adapter.logger.debug(f"上传响应: {upload_res}")
 
                 if upload_res.get("code") != 1:
-                    error_msg = upload_res.get("msg", "未知错误")
                     raise ValueError(f"文件上传失败: {upload_res}")
 
                 key_map = {
@@ -326,8 +350,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.logger = sdk.logger
         self.adapter = sdk.adapter
 
-        self.config = self._load_config()
-        self.yhToken = self.config.get("token", "")
+        # 加载多bot配置
+        self.bots: Dict[str, YunhuBotConfig] = self._load_bots_config()
         self.session: Optional[aiohttp.ClientSession] = None
         self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
         
@@ -338,26 +362,85 @@ class YunhuAdapter(sdk.BaseAdapter):
         convert = YunhuConverter()
         return convert.convert
 
-    def _load_config(self) -> Dict:
-        config = self.sdk.config.getConfig("Yunhu_Adapter", {})
-        if not config:
-            default_config = {
-                "token": "",
-                "server": {
-                    "path": "/webhook"
+    def _load_bots_config(self) -> Dict[str, YunhuBotConfig]:
+        """加载多bot配置"""
+        bots = {}
+        
+        # 检查新格式的bot配置
+        bot_configs = self.sdk.config.getConfig("Yunhu_Adapter.bots", {})
+        
+        if not bot_configs:
+            # 检查旧配置格式，进行兼容性处理
+            old_config = self.sdk.config.getConfig("Yunhu_Adapter")
+            if old_config and "token" in old_config:
+                self.logger.warning("检测到旧格式配置，正在迁移到新格式...")
+                self.logger.warning("旧配置已兼容，但建议迁移到新配置格式以获得更好的多bot支持。")
+                self.logger.warning("迁移方法：将现有配置移动到 Yunhu_Adapter.bots.default 下")
+                
+                # 临时使用旧配置，创建默认bot
+                server_config = old_config.get("server", {})
+                temp_config = {
+                    "default": {
+                        "bot_id": "default",  # 默认bot_id，用户需修改
+                        "token": old_config.get("token", ""),
+                        "webhook_path": server_config.get("path", "/webhook"),
+                        "enabled": True
+                    }
                 }
+                bot_configs = temp_config
+
+                self.logger.warning("已临时加载旧配置为默认bot，请尽快迁移到新格式并设置正确的bot_id")
+                
+            else:
+                # 创建默认bot配置
+                self.logger.info("未找到配置文件，创建默认bot配置")
+                default_config = {
+                    "default": {
+                        "bot_id": "default",  # 用户需修改为实际的机器人ID
+                        "token": "",
+                        "webhook_path": "/webhook",
+                        "enabled": True
+                    }
+                }
+                
+                try:
+                    self.sdk.config.setConfig("Yunhu_Adapter.bots", default_config)
+                    bot_configs = default_config
+                except Exception as e:
+                    self.logger.error(f"保存默认bot配置失败: {str(e)}")
+                    # 即使保存失败也使用内存中的配置
+                    bot_configs = default_config
+
+        # 创建bot配置对象
+        for bot_name, config in bot_configs.items():
+            # 检查必填字段
+            if "bot_id" not in config or not config["bot_id"]:
+                self.logger.error(f"Bot {bot_name} 缺少bot_id配置，已跳过")
+                continue
+            
+            if "token" not in config:
+                self.logger.error(f"Bot {bot_name} 缺少token配置，已跳过")
+                continue
+            
+            # 使用内置默认值
+            merged_config = {
+                "bot_id": config["bot_id"],
+                "token": config.get("token", ""),
+                "webhook_path": config.get("webhook_path", "/webhook"),
+                "enabled": config.get("enabled", True),
+                "name": bot_name
             }
-            try:
-                sdk.logger.warning("云湖适配器配置不存在，已自动创建默认配置")
-                self.sdk.config.setConfig("Yunhu_Adapter", default_config)
-                return default_config
-            except Exception as e:
-                self.logger.error(f"保存默认配置失败: {str(e)}")
-                return default_config
-        return config
+            
+            bots[bot_name] = YunhuBotConfig(**merged_config)
+        
+        self.logger.info(f"云湖适配器初始化完成，共加载 {len(bots)} 个机器人")
+        return bots
     
-    async def _net_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None) -> Dict:
-        url = f"{self.base_url}{endpoint}?token={self.yhToken}"
+    async def _net_request(self, method: str, endpoint: str, data: Dict = None, params: Dict = None, bot_token: str = None) -> Dict:
+        """网络请求基础方法"""
+        # 确定使用的token
+        token = bot_token if bot_token else ""
+        url = f"{self.base_url}{endpoint}?token={token}"
         if not self.session:
             self.session = aiohttp.ClientSession()
 
@@ -387,6 +470,22 @@ class YunhuAdapter(sdk.BaseAdapter):
         """
         发送流式消息并返回标准 OneBot12 响应格式
         """
+        # 确定使用的bot
+        bot_name = kwargs.get("_account_id")
+        if bot_name and bot_name in self.bots:
+            bot = self.bots[bot_name]
+            if not bot.enabled:
+                raise ValueError(f"Bot {bot_name} 已禁用")
+            bot_token = bot.token
+        else:
+            # 使用第一个启用的bot
+            enabled_bots = [b for b in self.bots.values() if b.enabled]
+            if not enabled_bots:
+                raise ValueError("没有配置任何启用的机器人")
+            bot = enabled_bots[0]
+            bot_token = bot.token
+            bot_name = list(self.bots.keys())[0]
+
         endpoint = "/bot/send-stream"
         params = {
             "recvId": target_id,
@@ -395,10 +494,10 @@ class YunhuAdapter(sdk.BaseAdapter):
         }
         if "parent_id" in kwargs:
             params["parentId"] = kwargs["parent_id"]
-        url = f"{self.base_url}{endpoint}?token={self.yhToken}"
+        url = f"{self.base_url}{endpoint}?token={bot_token}"
         query_params = "&".join([f"{k}={v}" for k, v in params.items()])
         full_url = f"{url}&{query_params}"
-        self.logger.debug(f"准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}")
+        self.logger.debug(f"Bot {bot_name} 准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}")
         if not self.session:
             self.session = aiohttp.ClientSession()
         headers = {"Content-Type": "text/plain"}
@@ -411,7 +510,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                 "retcode": 0 if raw_response.get("code") == 1 else 34000 + (raw_response.get("code") or 0),
                 "data": raw_response.get("data"),
                 "message": raw_response.get("msg", ""),
-                "yunhu_raw": raw_response
+                "yunhu_raw": raw_response,
+                "self": {"user_id": bot.bot_id}  # 使用bot_id标识机器人账号
             }
             
             # 如果成功，提取消息ID
@@ -430,10 +530,31 @@ class YunhuAdapter(sdk.BaseAdapter):
                 
             return standardized
 
-    async def call_api(self, endpoint: str, **params):
-        self.logger.debug(f"调用API:{endpoint} 参数:{params}")
+    async def call_api(self, endpoint: str, _account_id: str = None, **params):
+        """
+        调用云湖API
         
-        raw_response = await self._net_request("POST", endpoint, params)
+        :param endpoint: API端点
+        :param _account_id: 指定使用的机器人账户名称
+        :param params: 其他API参数
+        :return: 标准化的响应
+        """
+        # 确定使用的bot
+        if _account_id and _account_id in self.bots:
+            bot = self.bots[_account_id]
+            if not bot.enabled:
+                raise ValueError(f"Bot {_account_id} 已禁用")
+        else:
+            # 使用第一个启用的bot
+            enabled_bots = [b for b in self.bots.values() if b.enabled]
+            if not enabled_bots:
+                raise ValueError("没有配置任何启用的机器人")
+            bot = enabled_bots[0]
+            _account_id = next((name for name, b in self.bots.items() if b == bot), "")
+        
+        self.logger.debug(f"Bot {_account_id} 调用API:{endpoint} 参数:{params}")
+        
+        raw_response = await self._net_request("POST", endpoint, params, bot_token=bot.token)
         
         is_batch = "batch" in endpoint or isinstance(params.get('recvIds'), list)
         
@@ -442,7 +563,8 @@ class YunhuAdapter(sdk.BaseAdapter):
             "retcode": 0 if raw_response.get("code") == 1 else 34000 + (raw_response.get("code") or 0),
             "data": raw_response.get("data"),
             "message": raw_response.get("msg", ""),
-            "yunhu_raw": raw_response
+            "yunhu_raw": raw_response,
+            "self": {"user_id": bot.bot_id}  # 使用bot_id标识机器人账号
         }
         
         if raw_response.get("code") == 1:
@@ -467,7 +589,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         
         return standardized
     
-    async def _process_webhook_event(self, data: Dict):
+    async def _process_webhook_event(self, data: Dict, bot_name: str = None):
+        """处理webhook事件"""
         try:
             if not isinstance(data, dict):
                 raise ValueError("事件数据必须是字典类型")
@@ -476,38 +599,63 @@ class YunhuAdapter(sdk.BaseAdapter):
                 raise ValueError("无效的事件数据结构")
             
             if hasattr(self.adapter, "emit"):
-                onebot_event = self.convert(data)
-                self.logger.debug(f"OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}")
+                # 获取对应的bot配置
+                bot = None
+                if bot_name and bot_name in self.bots:
+                    bot = self.bots[bot_name]
+                
+                onebot_event = self.convert(data, bot.bot_id if bot else None)
+                self.logger.debug(f"Bot {bot_name} OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}")
                 if onebot_event:
                     await self.adapter.emit(onebot_event)
 
         except Exception as e:
-            self.logger.error(f"处理事件错误: {str(e)}")
+            self.logger.error(f"Bot {bot_name} 处理事件错误: {str(e)}")
             self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
 
     async def register_webhook(self):
-        if not self.config.get("server"):
-            self.logger.warning("Webhook服务器未配置，将不会注册")
-            return
-
-        server_config = self.config["server"]
-        path = server_config.get("path", "/webhook")
+        """为每个启用的bot注册webhook路由"""
+        enabled_bots = {name: bot for name, bot in self.bots.items() if bot.enabled}
         
-        router.register_http_route(
-            "yunhu",
-            path,
-            self._process_webhook_event,
-            methods=["POST"]
-        )
+        if not enabled_bots:
+            self.logger.warning("没有配置任何启用的机器人，将不会注册webhook")
+            return
+        
+        # 为每个bot注册独立的webhook路由
+        for bot_name, bot in enabled_bots.items():
+            path = bot.webhook_path
+            
+            # 创建特定bot的处理器
+            def make_webhook_handler(bot_name):
+                async def webhook_handler(data: Dict):
+                    return await self._process_webhook_event(data, bot_name)
+                return webhook_handler
+            
+            # 注册路由（使用bot_name作为模块名以避免冲突）
+            router.register_http_route(
+                f"yunhu_{bot_name}",  # 使用bot特定的路由名称
+                path,
+                make_webhook_handler(bot_name),
+                methods=["POST"]
+            )
+            
+            self.logger.info(f"已注册Bot {bot_name} (ID: {bot.bot_id}) 的Webhook路由: {path}")
         
     async def start(self):
+        """启动云湖适配器"""
         if not self.session:
             self.session = aiohttp.ClientSession()
 
-        await self.register_webhook()
-        self.logger.info("云湖适配器已启动")
+        enabled_bots = [name for name, bot in self.bots.items() if bot.enabled]
+        
+        if enabled_bots:
+            await self.register_webhook()
+            self.logger.info(f"云湖适配器已启动，启用的Bot: {', '.join(enabled_bots)}")
+        else:
+            self.logger.warning("没有配置任何启用的机器人，适配器启动但无可用Bot")
 
     async def shutdown(self):
+        """关闭云湖适配器"""
         if self.session:
             await self.session.close()
             self.session = None

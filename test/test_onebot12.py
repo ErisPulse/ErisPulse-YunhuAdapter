@@ -162,7 +162,7 @@ async def test_onebot_all_events():
 
 async def main():
     try:
-        sdk.init()
+        await sdk.init()
         await sdk.adapter.startup()
         await asyncio.sleep(1)  # 等待适配器初始化
         

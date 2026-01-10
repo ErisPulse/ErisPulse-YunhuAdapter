@@ -103,7 +103,41 @@ await yunhu.Send.To("group", "group456").DismissBoard("local", chat_id="group456
 
 ### 配置说明
 
-首次运行会生成配置，内容及解释如下：
+首次运行会生成配置。云湖适配器支持多机器人配置。
+
+#### 多Bot配置（推荐）
+
+```toml
+# config.toml
+[Yunhu_Adapter.bots.bot1]
+bot_id = "30535459"  # 机器人ID（必填）
+token = "your_bot1_token"  # 机器人token（必填）
+webhook_path = "/webhook/bot1"  # Webhook路径（可选，默认为"/webhook"）
+enabled = true  # 是否启用（可选，默认为true）
+
+[Yunhu_Adapter.bots.bot2]
+bot_id = "12345678"  # 第二个机器人的ID
+token = "your_bot2_token"  # 第二个机器人的token
+webhook_path = "/webhook/bot2"  # 独立的webhook路径
+enabled = true
+```
+
+**配置项说明：**
+- `bot_id`：机器人的唯一标识ID（必填），用于标识是哪个机器人触发的事件
+- `token`：云湖平台提供的API token（必填）
+- `webhook_path`：接收云湖事件的HTTP路径（可选，默认为"/webhook"）
+- `enabled`：是否启用该bot（可选，默认为true）
+
+**重要提示：**
+1. 云湖平台的事件中不包含机器人ID，因此必须在配置中明确指定`bot_id`
+2. 每个bot都应该有独立的`webhook_path`，以便接收各自的webhook事件
+3. 在云湖平台配置webhook时，请为每个bot配置对应的URL，例如：
+   - Bot1: `https://your-domain.com/webhook/bot1`
+   - Bot2: `https://your-domain.com/webhook/bot2`
+
+#### 单Bot配置（兼容旧格式）
+
+如果只有一个bot，也可以使用旧格式的配置（但建议迁移到新格式）：
 
 ```toml
 # config.toml
@@ -112,6 +146,26 @@ token = "your_yunhu_token"
 
 [Yunhu_Adapter.server]
 path = "/webhook"
+```
+
+**注意：** 旧格式配置会自动迁移为默认bot，但`bot_id`需要手动设置为实际值。
+
+#### 指定发送Bot
+
+可以通过`Using()`方法指定使用哪个bot发送消息：
+
+```python
+from ErisPulse.Core import adapter
+yunhu = adapter.get("yunhu")
+
+# 使用bot1发送消息
+await yunhu.Send.Using("bot1").To("user", "user123").Text("Hello from bot1!")
+
+# 使用bot2发送消息
+await yunhu.Send.Using("bot2").To("group", "group456").Text("Hello from bot2!")
+
+# 不指定时使用第一个启用的bot
+await yunhu.Send.To("user", "user123").Text("Hello from default bot!")
 ```
 
 ---
@@ -174,7 +228,17 @@ async def handle_button(data):
 async def handle_message(event):
     if event["platform"] == "yunhu":
         # 处理云湖消息事件
-        pass
+        # 获取触发事件的机器人ID
+        bot_id = event["self"]["user_id"]
+        print(f"消息来自Bot: {bot_id}")
+        
+        # 可以根据不同的bot_id执行不同的逻辑
+        if bot_id == "30535459":
+            # bot1 的处理逻辑
+            pass
+        elif bot_id == "12345678":
+            # bot2 的处理逻辑
+            pass
 
 @sdk.adapter.on("notice")
 async def handle_notice(event):
@@ -191,6 +255,8 @@ async def handle_notice(event):
 4. 程序退出时请调用 `shutdown()` 确保资源释放
 5. 指令事件中的 commandId 是唯一标识符，可用于区分不同的指令
 6. 官方事件数据结构需通过 `data["event"]` 访问
+7. **重要**：云湖平台的事件不包含机器人ID，必须在配置中正确设置`bot_id`，以便识别是哪个机器人触发的事件
+8. 多bot配置时，确保每个bot有独立的webhook路径，并在云湖平台正确配置对应的URL
 
 ---
 

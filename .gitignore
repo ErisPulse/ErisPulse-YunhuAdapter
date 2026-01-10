@@ -194,3 +194,5 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+test/test_multi_bot.py
+test/config.toml

@@ -35,11 +35,12 @@ class YunhuConverter:
             "bot.setting": "notice.yunhu_bot_setting"
         }
 
-    def convert(self, data: Dict) -> Optional[Dict]:
+    def convert(self, data: Dict, bot_id: str = None) -> Optional[Dict]:
         """
         主转换方法
         
         :param data: 原始事件数据
+        :param bot_id: 机器人ID（用于设置self.user_id）
         :return: 符合OneBot12标准的事件字典
         """
         if not isinstance(data, dict):
@@ -60,7 +61,7 @@ class YunhuConverter:
             "platform": "yunhu",
             "self": {
                 "platform": "yunhu",
-                "user_id": ""
+                "user_id": bot_id if bot_id else ""  # 使用传入的bot_id
             },
             # 基础字段：用户昵称
             "user_nickname": "",
@@ -162,11 +163,11 @@ class YunhuConverter:
             "user_nickname": sender.get("senderNickname", "")
         })
 
-        # 设置群聊ID或机器人ID
+        # 设置群聊ID
         if base_event["detail_type"] == "group":
             base_event["group_id"] = chat_info.get("chatId", "")
-        else:
-            base_event["self"]["user_id"] = chat_info.get("chatId", "")
+        # 私聊时保持使用配置的bot_id，不使用chatId作为self.user_id
+        # 因为云湖的chatId在不同场景下可能有不同含义，而我们需要明确的机器人标识
         
         # 处理指令消息 (云湖扩展)
         if "receive.instruction" in event_type:
@@ -194,11 +195,7 @@ class YunhuConverter:
             "type": "notice",
             "detail_type": "friend_increase" if event_type == "bot.followed" else "friend_decrease",
             "user_id": event_data.get("userId", ""),
-            "user_nickname": event_data.get("nickname", ""),
-            "self": {
-                "platform": "yunhu",
-                "user_id": event_data.get("chatId", "")
-            }
+            "user_nickname": event_data.get("nickname", "")
         })
         return base_event
     def _handle_group_member_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
@@ -212,11 +209,7 @@ class YunhuConverter:
             "group_id": event_data.get("chatId", ""),
             "user_id": event_data.get("userId", ""),
             "user_nickname": event_data.get("nickname", ""),
-            "operator_id": "",
-            "self": {
-                "platform": "yunhu",
-                "user_id": ""
-            }
+            "operator_id": ""
         })
         return base_event
 
@@ -233,10 +226,6 @@ class YunhuConverter:
             "yunhu_button": {
                 "id": event_data.get("buttonId", ""),
                 "value": event_data.get("value", "")
-            },
-            "self": {
-                "platform": "yunhu",
-                "user_id": ""
             }
         })
         return base_event
@@ -255,10 +244,6 @@ class YunhuConverter:
                 "id": event_data.get("menuId", ""),
                 "type": event_data.get("menuType", 1),
                 "action": event_data.get("menuAction", 1)
-            },
-            "self": {
-                "platform": "yunhu",
-                "user_id": ""
             }
         })
         return base_event
@@ -272,11 +257,7 @@ class YunhuConverter:
             "detail_type": "yunhu_bot_setting",
             "group_id": event_data.get("groupId", ""),
             "user_nickname": event_data.get("nickname", ""),
-            "yunhu_setting": event_data.get("settingJson", {}),
-            "self": {
-                "platform": "yunhu",
-                "user_id": event_data.get("chatId", "")
-            }
+            "yunhu_setting": event_data.get("settingJson", {})
         })
         return base_event
     def _build_media_data(self, content: Dict, media_type: str) -> Dict:
