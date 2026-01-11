@@ -243,11 +243,26 @@ class YunhuAdapter(sdk.BaseAdapter):
             # 确定使用的bot
             bot_name = self._account_id
             bot = None
+
+            # 智能判断 _account_id 是账户名还是 bot_id
             if bot_name and bot_name in self._adapter.bots:
+                # _account_id 是账户名，直接使用
                 bot = self._adapter.bots[bot_name]
                 if not bot.enabled:
                     raise ValueError(f"Bot {bot_name} 已禁用")
-            else:
+            elif bot_name:
+                # _account_id 是 bot_id，查找对应的账户
+                for name, bot_config in self._adapter.bots.items():
+                    if bot_config.bot_id == bot_name:
+                        bot = bot_config
+                        bot_name = name
+                        break
+                if bot and not bot.enabled:
+                    raise ValueError(f"Bot {bot_name} (bot_id: {bot.bot_id}) 已禁用")
+                if not bot:
+                    self.logger.warning(f"找不到bot_id为 {bot_name} 的机器人，将使用默认bot")
+
+            if not bot:
                 # 使用第一个启用的bot
                 enabled_bots = [b for b in self._adapter.bots.values() if b.enabled]
                 if not enabled_bots:
@@ -305,7 +320,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 else:
                     upload_filename = file_name
 
-            sdk.logger.debug(f"上传文件: {upload_filename}")
+            self._adapter.logger.debug(f"Bot {bot_name} (bot_id: {bot.bot_id}) 上传文件: {upload_filename}")
             data.add_field(
                 name=content_type,
                 value=file_data,
@@ -472,12 +487,28 @@ class YunhuAdapter(sdk.BaseAdapter):
         """
         # 确定使用的bot
         bot_name = kwargs.get("_account_id")
+        bot = None
+
+        # 智能判断 _account_id 是账户名还是 bot_id
         if bot_name and bot_name in self.bots:
+            # _account_id 是账户名，直接使用
             bot = self.bots[bot_name]
             if not bot.enabled:
                 raise ValueError(f"Bot {bot_name} 已禁用")
             bot_token = bot.token
-        else:
+        elif bot_name:
+            # _account_id 是 bot_id，查找对应的账户
+            for name, bot_config in self.bots.items():
+                if bot_config.bot_id == bot_name:
+                    bot = bot_config
+                    bot_name = name
+                    break
+            if bot and not bot.enabled:
+                raise ValueError(f"Bot {bot_name} (bot_id: {bot.bot_id}) 已禁用")
+            if not bot:
+                self.logger.warning(f"找不到bot_id为 {bot_name} 的机器人，将使用默认bot")
+
+        if not bot:
             # 使用第一个启用的bot
             enabled_bots = [b for b in self.bots.values() if b.enabled]
             if not enabled_bots:
@@ -497,7 +528,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         url = f"{self.base_url}{endpoint}?token={bot_token}"
         query_params = "&".join([f"{k}={v}" for k, v in params.items()])
         full_url = f"{url}&{query_params}"
-        self.logger.debug(f"Bot {bot_name} 准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}")
+        self.logger.debug(f"Bot {bot_name} (bot_id: {bot.bot_id}) 准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}")
         if not self.session:
             self.session = aiohttp.ClientSession()
         headers = {"Content-Type": "text/plain"}
@@ -533,31 +564,47 @@ class YunhuAdapter(sdk.BaseAdapter):
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
         """
         调用云湖API
-        
+
         :param endpoint: API端点
-        :param _account_id: 指定使用的机器人账户名称
+        :param _account_id: 账户名或bot_id
         :param params: 其他API参数
         :return: 标准化的响应
         """
         # 确定使用的bot
+        bot = None
+
+        # 智能判断 _account_id 是账户名还是 bot_id
         if _account_id and _account_id in self.bots:
+            # _account_id 是账户名，直接使用
             bot = self.bots[_account_id]
             if not bot.enabled:
                 raise ValueError(f"Bot {_account_id} 已禁用")
-        else:
+        elif _account_id:
+            # _account_id 是 bot_id，查找对应的账户
+            for name, bot_config in self.bots.items():
+                if bot_config.bot_id == _account_id:
+                    bot = bot_config
+                    _account_id = name
+                    break
+            if bot and not bot.enabled:
+                raise ValueError(f"Bot {_account_id} (bot_id: {bot.bot_id}) 已禁用")
+            if not bot:
+                self.logger.warning(f"找不到bot_id为 {_account_id} 的机器人，将使用默认bot")
+
+        if not bot:
             # 使用第一个启用的bot
             enabled_bots = [b for b in self.bots.values() if b.enabled]
             if not enabled_bots:
                 raise ValueError("没有配置任何启用的机器人")
             bot = enabled_bots[0]
             _account_id = next((name for name, b in self.bots.items() if b == bot), "")
-        
-        self.logger.debug(f"Bot {_account_id} 调用API:{endpoint} 参数:{params}")
-        
+
+        self.logger.debug(f"Bot {_account_id} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}")
+
         raw_response = await self._net_request("POST", endpoint, params, bot_token=bot.token)
-        
+
         is_batch = "batch" in endpoint or isinstance(params.get('recvIds'), list)
-        
+
         standardized = {
             "status": "ok" if raw_response.get("code") == 1 else "failed",
             "retcode": 0 if raw_response.get("code") == 1 else 34000 + (raw_response.get("code") or 0),
@@ -566,27 +613,27 @@ class YunhuAdapter(sdk.BaseAdapter):
             "yunhu_raw": raw_response,
             "self": {"user_id": bot.bot_id}  # 使用bot_id标识机器人账号
         }
-        
+
         if raw_response.get("code") == 1:
             if is_batch:
                 standardized["message_id"] = [
-                    msg.get("msgId", "") 
-                    for msg in raw_response.get("data", {}).get("successList", []) 
+                    msg.get("msgId", "")
+                    for msg in raw_response.get("data", {}).get("successList", [])
                     if isinstance(msg, dict) and msg.get("msgId")
                 ] if "successList" in raw_response.get("data", {}) else []
             else:
                 data = raw_response.get("data", {})
                 standardized["message_id"] = (
-                    data.get("messageInfo", {}).get("msgId", "") 
-                    if "messageInfo" in data 
+                    data.get("messageInfo", {}).get("msgId", "")
+                    if "messageInfo" in data
                     else data.get("msgId", "")
                 )
         else:
             standardized["message_id"] = [] if is_batch else ""
-        
+
         if "echo" in params:
             standardized["echo"] = params["echo"]
-        
+
         return standardized
     
     async def _process_webhook_event(self, data: Dict, bot_name: str = None):
