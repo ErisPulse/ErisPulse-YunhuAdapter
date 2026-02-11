@@ -1,337 +1,535 @@
-# main.py
-# ErisPulse 主程序文件 - 全面测试脚本
 import asyncio
-import os
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional, List, Dict, Any
 from ErisPulse import sdk
 
-# 测试配置
-test_user_id = "5197892"        # 设为None则不测试私聊功能
-another_user_id = "5197892"
 
-test_group_id = "635409929"     # 设为None则不测试群聊功能
-another_group_id = "635409929"
-
-async def test_text_messages():
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
-        result = await Send.Text("测试私聊文本消息")
-        sdk.logger.info(f"私聊文本消息发送结果: {result}")
-        
-    if test_group_id:
-        Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
-        result = await Send.Text("测试群聊文本消息")
-        sdk.logger.info(f"群聊文本消息发送结果: {result}")
-
-async def test_rich_messages():
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
-        result = await Send.Html("<b>加粗</b> <i>斜体</i> <u>下划线</u>")
-        sdk.logger.info(f"HTML消息发送结果: {result}")
-        
-        result = await Send.Markdown("# 标题\n- 列表项1\n- 列表项2")
-        sdk.logger.info(f"Markdown消息发送结果: {result}")
-    if test_group_id:
-        Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
-        result = await Send.Html("<b>加粗</b> <i>斜体</i> <u>下划线</u>")
-        sdk.logger.info(f"HTML消息发送结果: {result}")
-        result = await Send.Markdown("# 标题\n- 列表项1\n- 列表项2")
-        sdk.logger.info(f"Markdown消息发送结果: {result}")
-
-async def test_media_messages():
-    test_files = [
-        ("test_files/test.docx", "file", "测试文档.docx"),
-        ("test_files/test.jpg", "image", "测试图片.jpg"),
-        ("test_files/test.mp4", "video", "测试视频.mp4")
-    ]
+@dataclass
+class TestConfig:
+    """测试配置类"""
+    # 适配器配置
+    adapter_name: str = "yunhu"  # 要测试的适配器名称
     
-    # 创建测试目录和文件（如果不存在）
-    os.makedirs("test_files", exist_ok=True)
-    for file in test_files:
-        if not os.path.exists(file[0]):
-            with open(file[0], "wb") as f:
-                f.write(b"Test content for " + file[2].encode())
+    # 基础配置
+    group_id: str = "272475188"  # 测试群号
+    test_user_id: str = "5197892"  # 测试用户ID
+    test_user_id_2: str = "5940358"  # 第二个测试用户ID
     
-    for target_type, target_id in [("user", test_user_id), ("group", test_group_id)]:
-        if not target_id:
-            continue
+    # 文件路径配置
+    test_files_dir: str = "test_files"
+    video_file: str = "test.mp4"
+    image_file: str = "test.jpg"
+    doc_file  : str = "test.docx"
+    voice_file: Optional[str] = "M5000017K7gL4WYnw2.mp3"
+    
+    # 消息发送间隔（秒）
+    send_interval: float = 1.0
+    
+    # 启用/禁用特定测试
+    enable_basic_tests: bool = True  # 基础测试（1-5）
+    enable_media_tests: bool = True  # 媒体测试（6-11）
+    enable_advanced_tests: bool = True  # 高级功能测试（12-16）
+    enable_format_tests: bool = True  # 格式化消息测试（17-19）
+    enable_chain_tests: bool = True  # 链式调用测试（20-24）
+    enable_mention_tests: bool = True  # @功能测试（25-26）
+    enable_recall_tests: bool = True  # 撤回测试（27）
+    
+    # 单独启用的测试（列表形式）
+    # 例如：[1, 6, 7] 表示只运行测试1、6和7
+    # 如果为空列表，则根据上面的 bool 配置运行
+    # specific_tests: List[int] = field(default_factory=list)
+    specific_tests = [13]
+    
+    # URL 配置
+    image_url: str = "https://http.cat/200"
+    voice_url: str = "http://music.163.com/song/media/outer/url?id=1372315637.mp3"
+    video_url: str = "https://www.w3school.com.cn/example/html5/mov_bbb.mp4"
+    file_url: str = "https://www.w3school.com.cn/example/html5/mov_bbb.mp4"
+
+
+@dataclass
+class TestResult:
+    """单个测试结果"""
+    test_num: int
+    test_name: str
+    status: str  # "success", "failed", "error", "skipped"
+    response: Optional[dict] = None
+    error_message: Optional[str] = None
+    execution_time: float = 0.0
+
+
+@dataclass
+class TestCase:
+    """测试用例类"""
+    name: str
+    enabled: bool = True
+    async_func: Optional[callable] = None
+    description: str = ""
+
+
+class TestRunner:
+    """测试运行器"""
+    
+    def __init__(self, config: TestConfig):
+        self.config = config
+        self.adapter = None
+        self.test_cases: List[TestCase] = []
+        self.results: List[TestResult] = []
+        self.reply_message_id = ""  # 用于存储回复测试的 message_id
+        self.recall_message_id = ""  # 用于存储撤回测试的 message_id
+        
+    def setup(self):
+        """初始化"""
+        self.adapter = getattr(sdk.adapter, self.config.adapter_name).Send
+        self._register_test_cases()
+        
+    def _read_file(self, filename: str) -> Optional[bytes]:
+        """读取文件内容"""
+        file_path = Path(self.config.test_files_dir) / filename
+        if not file_path.exists():
+            return None
+        try:
+            with open(file_path, 'rb') as f:
+                return f.read()
+        except Exception:
+            return None
+    
+    def _register_test_cases(self):
+        """注册所有测试用例"""
+        # 基础测试
+        self._add_basic_tests()
+        # 媒体测试
+        self._add_media_tests()
+        # 高级功能测试
+        self._add_advanced_tests()
+        # 格式化消息测试
+        self._add_format_tests()
+        # 链式调用测试
+        self._add_chain_tests()
+        # @功能测试
+        self._add_mention_tests()
+    
+    def _add_basic_tests(self):
+        """添加基础测试用例"""
+        self.test_cases.extend([
+            TestCase("发送文本消息", self.config.enable_basic_tests, None),
+            TestCase("发送@用户消息", self.config.enable_basic_tests, None),
+            TestCase("发送表情（emoji）", self.config.enable_basic_tests, None),
+            TestCase("发送Markdown消息", self.config.enable_basic_tests, None),
+            TestCase("发送Html消息", self.config.enable_basic_tests, None),
+        ])
+    
+    def _add_media_tests(self):
+        """添加媒体测试用例"""
+        self.test_cases.extend([
+            TestCase("发送图片（本地文件）", self.config.enable_media_tests, None),
+            TestCase("发送图片（URL）", self.config.enable_media_tests, None),
+            TestCase("发送视频（本地文件）", self.config.enable_media_tests, None),
+            TestCase("发送视频（URL）", self.config.enable_media_tests, None),
+            TestCase("发送语音（本地文件）", self.config.enable_media_tests, None),
+            TestCase("发送语音（URL）", self.config.enable_media_tests, None),
+        ])
+    
+    def _add_advanced_tests(self):
+        """添加高级功能测试用例"""
+        self.test_cases.extend([
+            TestCase("发送文件（本地）", self.config.enable_advanced_tests, None),
+            TestCase("发送文件（URL）", self.config.enable_advanced_tests, None),
+            TestCase("发送回复消息", self.config.enable_advanced_tests, None),
+            TestCase("发送组合消息", self.config.enable_advanced_tests, None),
+            TestCase("撤回消息", self.config.enable_advanced_tests, None),
+        ])
+    
+    def _add_format_tests(self):
+        """添加格式化消息测试用例"""
+        self.test_cases.extend([
+            TestCase("发送格式化消息（Raw_ob12）", self.config.enable_format_tests, None),
+            TestCase("发送文本消息段", self.config.enable_format_tests, None),
+            TestCase("发送组合消息段", self.config.enable_format_tests, None),
+        ])
+    
+    def _add_chain_tests(self):
+        """添加链式调用测试用例"""
+        self.test_cases.extend([
+            TestCase("多次@用户（链式调用）", self.config.enable_chain_tests, None),
+            TestCase("链式调用 - 回复+@用户", self.config.enable_chain_tests, None),
+            TestCase("链式调用 - 组合修饰符", self.config.enable_chain_tests, None),
+            TestCase("格式化消息 + 链式@", self.config.enable_chain_tests, None),
+            TestCase("复杂组合消息", self.config.enable_chain_tests, None),
+        ])
+    
+    def _add_mention_tests(self):
+        """添加@功能测试用例"""
+        self.test_cases.extend([
+            TestCase("@全体成员", self.config.enable_mention_tests, None),
+            TestCase("@全体 + @用户组合", self.config.enable_mention_tests, None),
+        ])
+    
+    def _check_response(self, response: Any) -> tuple[bool, Optional[dict]]:
+        """检查响应是否成功"""
+        if response is None:
+            return False, None
+        
+        # 如果是 Task 对象，获取结果
+        if hasattr(response, '__await__'):
+            # 这是一个协程，已经被 await 了
+            if isinstance(response, dict):
+                resp = response
+            else:
+                return False, None
+        elif isinstance(response, dict):
+            resp = response
+        else:
+            return False, None
+        
+        # 检查响应格式是否符合标准
+        if isinstance(resp, dict):
+            status = resp.get("status")
+            retcode = resp.get("retcode", -1)
             
-        Send = sdk.adapter.yunhu.Send.To(target_type, target_id)
+            if status == "ok" and retcode == 0:
+                return True, resp
         
-        for file_path, file_type, display_name in test_files:
-            try:
-                with open(file_path, "rb") as f:
-                    content = f.read()
-                    
-                    if file_type == "file":
-                        result = await Send.File(content, filename=display_name)
-                    elif file_type == "image":
-                        result = await Send.Image(content, filename=display_name)
-                    elif file_type == "video":
-                        result = await Send.Video(content, filename=display_name)
-                    
-                    sdk.logger.info(f"{target_type} {file_type}普通上传结果: {result}")
-                    
-                    # 测试流式上传
-                    async def file_stream():
-                        with open(file_path, "rb") as f:
-                            while chunk := f.read(4096 * 1024):
-                                yield chunk
-                                await asyncio.sleep(0.05)
-
-                    if file_type == "file":
-                        result = await Send.File(file_stream(), stream=True, filename="stream_"+display_name)
-                    elif file_type == "image":
-                        result = await Send.Image(file_stream(), stream=True, filename="stream_"+display_name)
-                    elif file_type == "video":
-                        result = await Send.Video(file_stream(), stream=True, filename="stream_"+display_name)
-                        
-                    sdk.logger.info(f"{target_type} {file_type}流式上传结果: {result}")
-                    
-            except Exception as e:
-                sdk.logger.error(f"{target_type} {file_type}上传失败: {str(e)}", exc_info=True)
-
-async def test_message_operations():
-    if test_group_id:
-        Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
-        
-        # 发送初始消息
-        send_result = await Send.Text("测试编辑的消息")
-        msg_id = send_result['data']['messageInfo']['msgId']
-        sdk.logger.info(f"初始消息发送成功: {msg_id}")
-        
-        # 编辑消息
-        edit_result = await Send.Edit(msg_id, "已编辑的消息内容")
-        sdk.logger.info(f"消息编辑结果: {edit_result}")
-        
-        # 撤回消息
-        recall_result = await Send.Recall(msg_id)
-        sdk.logger.info(f"消息撤回结果: {recall_result}")
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
-        
-        # 发送初始消息
-        send_result = await Send.Text("测试编辑的消息")
-        msg_id = send_result['data']['messageInfo']['msgId']
-        sdk.logger.info(f"初始消息发送成功: {msg_id}")
-        
-        # 编辑消息
-        edit_result = await Send.Edit(msg_id, "已编辑的消息内容")
-        sdk.logger.info(f"消息编辑结果: {edit_result}")
-        
-        # 撤回消息
-        recall_result = await Send.Recall(msg_id)
-        sdk.logger.info(f"消息撤回结果: {recall_result}")
-
-async def test_buttons():
-    buttons = [
-        {
-            "text": "按钮1",
-            "actionType": 2,
-            "value": "button1_value"
-        },
-        {
-            "text": "按钮2",
-            "actionType": 1,
-            "url": "http://www.example.com"
-        }
-    ]
+        return False, resp
     
-    # 编辑按钮
-    new_buttons = [
-        {
-            "text": "新按钮1",
-            "actionType": 2,
-            "value": "new_button1_value"
-        }
-    ]
-    if test_group_id:
-        Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
-        # 发送带按钮的消息
-        send_result = await Send.Text("测试按钮功能", buttons=buttons)
-        msg_id = send_result['data']['messageInfo']['msgId']
-        sdk.logger.info(f"带按钮消息发送成功: {msg_id}")
+    async def run_test(self, test_num: int):
+        """运行单个测试"""
+        if test_num > len(self.test_cases) or test_num < 1:
+            return
         
-        edit_result = await Send.Edit(msg_id, "已更新按钮的消息", buttons=new_buttons)
-        sdk.logger.info(f"按钮编辑结果: {edit_result}")
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
-        # 发送带按钮的消息
-        send_result = await Send.Text("测试按钮功能", buttons=buttons)
-        msg_id = send_result['data']['messageInfo']['msgId']
-        sdk.logger.info(f"带按钮消息发送成功: {msg_id}")
+        test_case = self.test_cases[test_num - 1]
+        print(f"{test_num}. {test_case.name}")
         
-        edit_result = await Send.Edit(msg_id, "已更新按钮的消息", buttons=new_buttons)
-        sdk.logger.info(f"消息更新成功: {msg_id}")
-async def test_batch_messages():
-    if test_user_id and test_group_id:
-        # 批量发送给多个用户
-        Send = sdk.adapter.yunhu.Send.To("user", [test_user_id, another_user_id])
-        result = await Send.Text("批量用户消息测试")
-        sdk.logger.info(f"批量用户消息结果: {result}")
+        result = TestResult(
+            test_num=test_num,
+            test_name=test_case.name,
+            status="skipped"
+        )
         
-        # 批量发送给多个群组
-        Send = sdk.adapter.yunhu.Send.To("group", [test_group_id, another_group_id])
-        result = await Send.Text("批量群组消息测试")
-        sdk.logger.info(f"批量群组消息结果: {result}")
-
-async def test_board():
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
+        start_time = time.time()
         
-        # 发布全局公告
-        board_result = await Send.Board("global", "测试全局公告", expire_time=3600)
-        sdk.logger.info(f"全局公告发布结果: {board_result}")
-        
-        # 发布用户公告
-        board_result = await Send.Board("local", "测试用户公告")
-        sdk.logger.info(f"用户公告发布结果: {board_result}")
-        
-        # 撤销公告
-        dismiss_result = await Send.DismissBoard("local", chat_id=test_user_id, chat_type="user", member_id=test_user_id)
-        sdk.logger.info(f"撤销用户公告结果: {dismiss_result}")
-        dismiss_result = await Send.DismissBoard("global")
-        sdk.logger.info(f"撤销全局公告结果: {dismiss_result}")
-
-async def test_formatted_streaming():
-    # 流式发送HTML格式内容
-    async def html_stream():
-        content_parts = [
-            "<h1>标题</h1>\n".encode("utf-8"),
-            "<p>这是<b>加粗</b>文本</p>\n".encode("utf-8"),
-            "<p>这是<i>斜体</i>文本</p>\n".encode("utf-8"),
-            "<ul><li>列表项1</li><li>列表项2</li></ul>\n".encode("utf-8")
-        ]
-        for part in content_parts:
-            yield part
-            await asyncio.sleep(0.5)
-    
-    # 流式发送Markdown格式内容
-    async def markdown_stream():
-        content_parts = [
-            "# 主标题\n\n".encode("utf-8"),
-            "这是**加粗**文本\n\n".encode("utf-8"),
-            "这是*斜体*文本\n\n".encode("utf-8"),
-            "- 列表项1\n- 列表项2\n".encode("utf-8")
-        ]
-        for part in content_parts:
-            yield part
-            await asyncio.sleep(0.5)
+        try:
+            # 执行测试
+            response = await self._execute_test(test_num)
             
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
+            # 检查结果
+            success, resp_dict = self._check_response(response)
+            
+            result.execution_time = time.time() - start_time
+            result.response = resp_dict
+            
+            if success:
+                result.status = "success"
+                print(f"  成功 - {result.execution_time:.2f}s")
+            else:
+                result.status = "failed"
+                if resp_dict:
+                    retcode = resp_dict.get("retcode", -1)
+                    message = resp_dict.get("message", "")
+                    print(f"  失败 - retcode: {retcode}, message: {message}")
+                else:
+                    print(f"  失败 - 无效响应")
+                    
+        except Exception as e:
+            result.execution_time = time.time() - start_time
+            result.status = "error"
+            result.error_message = str(e)
+            print(f"  错误 - {type(e).__name__}: {str(e)}")
         
-        # 测试HTML格式流式消息
-        result = await Send.Stream("html", html_stream())
-        sdk.logger.info(f"流式HTML消息结果: {result}")
-        
-        # 测试Markdown格式流式消息
-        result = await Send.Stream("markdown", markdown_stream())
-        sdk.logger.info(f"流式Markdown消息结果: {result}")
-        
-    if test_group_id:
-        Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
-        
-        # 测试HTML格式流式消息
-        result = await Send.Stream("html", html_stream())
-        sdk.logger.info(f"流式HTML消息结果: {result}")
-        
-        # 测试Markdown格式流式消息
-        result = await Send.Stream("markdown", markdown_stream())
-        sdk.logger.info(f"流式Markdown消息结果: {result}")
-async def test_burn_after_reading_html():
-    """
-    测试"被注释的"HTML消息：
-    1. 发送带注释的HTML消息（内容被注释掉，不可见）
-    2. 几秒后移除注释，让内容显示
-    3. 再过几秒后重新添加注释，使内容再次隐藏
-    """
-    burn_time = 3  # 显示时间（秒）
-    display_time = 2  # 可见时间（秒）
+        self.results.append(result)
+        await asyncio.sleep(self.config.send_interval)
     
-    if test_user_id:
-        Send = sdk.adapter.yunhu.Send.To("user", test_user_id)
+    async def _execute_test(self, test_num: int) -> Optional[Any]:
+        """执行具体的测试逻辑"""
+        group_id = self.config.group_id
+        test_user_id = self.config.test_user_id
         
-        # 初始消息：内容被HTML注释包裹（不可见）
-        initial_html = f"<!--\n<p>这是一条被注释的消息</p>\n<p>将在{burn_time}秒后显示...</p>\n-->"
-        result = await Send.Html(initial_html)
-        msg_id = result['data']['messageInfo']['msgId']
-        sdk.logger.info(f"被注释的消息已发送，ID: {msg_id}")
+        # 1. 发送文本消息
+        if test_num == 1:
+            return await self.adapter.To("group", group_id).Text("Hello, 这是一条测试消息！")
         
-        # 等待一段时间后"烧掉"注释（让内容可见）
-        await asyncio.sleep(burn_time)
-        visible_html = "<p>这是一条被注释的消息</p>\n<p>内容现在可见！</p>\n<p>将在2秒后消失...</p>"
-        await Send.Edit(msg_id, visible_html)
-        sdk.logger.info("消息内容已显示")
+        # 2. 发送@用户消息
+        elif test_num == 2:
+            return await self.adapter.To("group", group_id).At(test_user_id, "测试用户").Text("@某位成员")
         
-        # 等待短暂显示时间后重新添加注释（内容再次隐藏）
-        await asyncio.sleep(display_time)
-        hidden_html = "<!--\n<p>这是一条被注释的消息</p>\n<p>内容已消失</p>\n-->"
-        await Send.Edit(msg_id, hidden_html)
-        sdk.logger.info("消息内容已隐藏")
+        # 3. 发送表情
+        elif test_num == 3:
+            return await self.adapter.To("group", group_id).Face("1")
         
-    if test_group_id:
-        Send = sdk.adapter.yunhu.Send.To("group", test_group_id)
+        # 4. 发送Markdown消息
+        elif test_num == 4:
+            markdown_text = "**粗体** 和 *斜体* 文本测试"
+            return await self.adapter.To("group", group_id).Markdown(markdown_text)
         
-        # 初始消息：内容被HTML注释包裹（不可见）
-        initial_html = f"<!--\n<h2>群组被注释的消息</h2>\n<p>将在{burn_time}秒后显示...</p>\n-->"
-        result = await Send.Html(initial_html)
-        msg_id = result['data']['messageInfo']['msgId']
-        sdk.logger.info(f"群组被注释的消息已发送，ID: {msg_id}")
+        # 5. 发送Html消息
+        elif test_num == 5:
+            html_text = "<b>粗体</b> 和 <i>斜体</i> 文本测试"
+            return await self.adapter.To("group", group_id).Html(html_text)
         
-        # 等待一段时间后"烧掉"注释（让内容可见）
-        await asyncio.sleep(burn_time)
-        visible_html = "<h2>群组被注释的消息</h2>\n<p>内容现在可见！</p>\n<p>将在2秒后消失...</p>"
-        await Send.Edit(msg_id, visible_html)
-        sdk.logger.info("群组消息内容已显示")
+        # 6. 发送图片（本地文件）
+        elif test_num == 6:
+            image_data = self._read_file(self.config.image_file)
+            if image_data:
+                return await self.adapter.To("group", group_id).Image(image_data)
+            # 回退到 URL 方式
+            return await self.adapter.To("group", group_id).Image(self.config.image_url)
         
-        # 等待短暂显示时间后重新添加注释（内容再次隐藏）
-        await asyncio.sleep(display_time)
-        hidden_html = "<!--\n<h2>群组被注释的消息</h2>\n<p>内容已消失</p>\n-->"
-        await Send.Edit(msg_id, hidden_html)
-        sdk.logger.info("群组消息内容已隐藏")
-async def test_event_handlers():
-    yunhu = sdk.adapter.yunhu
+        # 7. 发送图片（URL）
+        elif test_num == 7:
+            return await self.adapter.To("group", group_id).Image(self.config.image_url)
+        
+        # 8. 发送视频（本地文件）
+        elif test_num == 8:
+            video_data = self._read_file(self.config.video_file)
+            if video_data:
+                return await self.adapter.To("group", group_id).Video(video_data)
+            # 回退到 URL 方式
+            return await self.adapter.To("group", group_id).Video(self.config.video_url)
+        
+        # 9. 发送视频（URL）
+        elif test_num == 9:
+            return await self.adapter.To("group", group_id).Video(self.config.video_url)
+        
+        # 10. 发送语音（本地文件）
+        elif test_num == 10:
+            if self.config.voice_file:
+                voice_data = self._read_file(self.config.voice_file)
+                if voice_data:
+                    return await self.adapter.To("group", group_id).Voice(voice_data)
+            # 回退到 URL 方式
+            return await self.adapter.To("group", group_id).Voice(self.config.voice_url)
+        
+        # 11. 发送语音（URL）
+        elif test_num == 11:
+            return await self.adapter.To("group", group_id).Voice(self.config.voice_url)
+        
+        # 12. 发送文件（本地）
+        elif test_num == 12:
+            file_data = self._read_file(self.config.doc_file)
+            if file_data:
+                return await self.adapter.To("group", group_id).File(file_data)
+            return await self.adapter.To("group", group_id).File(self.config.file_url)
+        
+        # 13. 发送文件（URL）
+        elif test_num == 13:
+            return await self.adapter.To("group", group_id).File(self.config.file_url)
+        
+        # 14. 发送回复消息
+        elif test_num == 14:
+            test_message = "这是一条测试消息，用于后续回复功能测试"
+            result = await self.adapter.To("group", group_id).Text(test_message)
+            
+            # 尝试获取 message_id
+            if isinstance(result, dict) and result.get("data", {}).get("message_id"):
+                self.reply_message_id = result["data"]["message_id"]
+            else:
+                self.reply_message_id = "temp_msg_id_" + str(int(time.time()))
+            
+            return result
+        
+        # 15. 发送组合消息
+        elif test_num == 15:
+            ob12_message = [
+                {"type": "text", "data": {"text": "组合消息测试："}},
+                {"type": "mention", "data": {"user_id": test_user_id}}
+            ]
+            return await self.adapter.To("group", group_id).Raw_ob12(ob12_message)
+        
+        # 16. 撤回消息
+        elif test_num == 16:
+            # 先发送一条消息
+            test_message = "这条消息将被撤回"
+            result = await self.adapter.To("group", group_id).Text(test_message)
+            
+            print(f"发送消息：{result}")
+            # 获取 message_id
+            self.recall_message_id = result.get("data", {}).get("message_id")
+            
+            # 等待一下再撤回
+            await asyncio.sleep(2)
+            
+            print(f"撤回消息：{self.recall_message_id}")
+
+            # 撤回消息
+            return await self.adapter.To("group", group_id).Recall(self.recall_message_id)
+        
+        # 17. 发送格式化消息（Raw_ob12）
+        elif test_num == 17:
+            ob12_message = [
+                {"type": "text", "data": {"text": "这是格式化消息 "}},
+                {"type": "text", "data": {"text": "使用 Raw_ob12 发送"}}
+            ]
+            return await self.adapter.To("group", group_id).Raw_ob12(ob12_message)
+        
+        # 18. 发送文本消息段
+        elif test_num == 18:
+            ob12_message = [
+                {"type": "text", "data": {"text": "第一条文本消息段"}},
+                {"type": "text", "data": {"text": "第二条文本消息段"}}
+            ]
+            return await self.adapter.To("group", group_id).Raw_ob12(ob12_message)
+        
+        # 19. 发送组合消息段
+        elif test_num == 19:
+            ob12_message = [
+                {"type": "text", "data": {"text": "文本 + 图片："}},
+                {"type": "image", "data": {"file": self.config.image_url}}
+            ]
+            return await self.adapter.To("group", group_id).Raw_ob12(ob12_message)
+        
+        # 20. 多次@用户（链式调用）
+        elif test_num == 20:
+            return await self.adapter.To("group", group_id).At(test_user_id).At(self.config.test_user_id_2).Text(" @多个用户")
+        
+        # 21. 链式调用 - 回复+@用户
+        elif test_num == 21:
+            return await self.adapter.To("group", group_id).Reply(self.reply_message_id).At(test_user_id).Text("回复并@用户")
+        
+        # 22. 链式调用 - 组合修饰符
+        elif test_num == 22:
+            return await self.adapter.To("group", group_id).At(test_user_id).Reply(self.reply_message_id).Text("@用户并回复")
+        
+        # 23. 格式化消息 + 链式@
+        elif test_num == 23:
+            ob12_message = [{"type": "text", "data": {"text": "格式化消息 + 链式@"}}]
+            return await self.adapter.To("group", group_id).At(test_user_id).Raw_ob12(ob12_message)
+        
+        # 24. 复杂组合消息
+        elif test_num == 24:
+            ob12_message = [
+                {"type": "text", "data": {"text": "复杂组合消息："}},
+                {"type": "mention", "data": {"user_id": test_user_id}},
+                {"type": "reply", "data": {"message_id": self.reply_message_id}}
+            ]
+            return await self.adapter.To("group", group_id).Raw_ob12(ob12_message)
+        
+        # 25. @全体成员
+        elif test_num == 25:
+            return await self.adapter.To("group", group_id).AtAll().Text("这是全体成员消息")
+        
+        # 26. @全体 + @用户组合
+        elif test_num == 26:
+            return await self.adapter.To("group", group_id).AtAll().At(test_user_id).Text("全体 + 单个@")
+        
+        return None
     
-    @yunhu.on("message")
-    async def handle_message(data):
-        sdk.logger.info(f"收到消息事件: {data}")
+    def _print_summary(self):
+        """打印测试结果汇总"""
+        success_count = sum(1 for r in self.results if r.status == "success")
+        failed_count = sum(1 for r in self.results if r.status == "failed")
+        error_count = sum(1 for r in self.results if r.status == "error")
+        total_time = sum(r.execution_time for r in self.results)
         
-    @yunhu.on("command")
-    async def handle_command(data):
-        sdk.logger.info(f"收到指令事件: {data}")
+        print("\n___")
+        print("测试结果")
+        print("    总结")
+        print(f"         成功：{success_count}个")
+        print(f"         失败：{failed_count}个")
+        print(f"         错误：{error_count}个")
         
-    @yunhu.on("follow")
-    async def handle_follow(data):
-        sdk.logger.info(f"收到关注事件: {data}")
+        if failed_count > 0:
+            print("\n    失败详情")
+            for r in self.results:
+                if r.status == "failed":
+                    if r.response:
+                        retcode = r.response.get("retcode", -1)
+                        message = r.response.get("message", "")
+                        print(f"         [{r.test_num}] {r.test_name} - retcode: {retcode}, message: {message}")
+                    else:
+                        print(f"         [{r.test_num}] {r.test_name} - 无响应")
+        
+        if error_count > 0:
+            print("\n    错误详情")
+            for r in self.results:
+                if r.status == "error":
+                    print(f"         [{r.test_num}] {r.test_name} - {r.error_message}")
+        
+        print(f"\n    执行时间：{total_time:.2f} 秒")
+        print("___")
+    
+    async def run_all(self):
+        """运行所有启用的测试"""
+        enabled_tests = []
+        
+        # 如果指定了特定测试，只运行这些测试
+        if self.config.specific_tests:
+            for test_num in self.config.specific_tests:
+                if 1 <= test_num <= len(self.test_cases):
+                    enabled_tests.append(test_num)
+                else:
+                    print(f"[警告] 无效的测试编号: {test_num}")
+        else:
+            # 否则根据配置运行所有启用的测试
+            for i, test_case in enumerate(self.test_cases, 1):
+                if test_case.enabled:
+                    enabled_tests.append(i)
+        
+        print(f"准备运行 {len(enabled_tests)} 个测试用例")
+        print("=" * 50)
+        
+        for test_num in enabled_tests:
+            await self.run_test(test_num)
+        
+        print("=" * 50)
+        self._print_summary()
+
 
 async def main():
     try:
-        sdk.init()
+        isInit = await sdk.init_task()
+        
+        if not isInit:
+            sdk.logger.error("ErisPulse 初始化失败，请检查日志")
+            return
+        
         await sdk.adapter.startup()
-        await asyncio.sleep(1)
+
+        # 等待适配器完全启动
+        await asyncio.sleep(3)
         
-        # 注册事件处理器
-        await test_event_handlers()
+        # 创建测试配置
+        config = TestConfig()
         
-        # # 执行各项测试
-        # await test_text_messages()
-        # await test_rich_messages()
-        # await test_media_messages()
-        # await test_message_operations()
-        # await test_buttons()
-        # await test_batch_messages()
-        # await test_board()
-        # 添加新的格式化流式消息测试
-        await test_formatted_streaming()
-        await test_burn_after_reading_html
-        sdk.logger.info("所有测试已完成")
+        # 配置示例：
+        # 1. 指定适配器
+        # config.adapter_name = "onebot12"
+        # config.adapter_name = "red"
+        
+        # 2. 只运行特定测试
+        # config.specific_tests = [6, 7, 8, 9, 10, 11]  # 只运行媒体测试
+        
+        # 3. 禁用某些测试类别
+        # config.enable_media_tests = False  # 禁用媒体测试
+        # config.enable_chain_tests = False   # 禁用链式调用测试
+        
+        # 4. 配置文件路径
+        # config.video_file = "my_video.mp4"
+        # config.voice_file = "my_voice.amr"
+        # config.test_files_dir = "custom/files"
+        
+        # 配置发送间隔（秒）
+        config.send_interval = 1.0
+        
+        print(f"测试适配器: {config.adapter_name}")
+        print(f"测试目标: 群号 {config.group_id}")
+        print("=" * 50)
+        
+        # 创建并运行测试
+        runner = TestRunner(config)
+        runner.setup()
+        await runner.run_all()
+        
+        # 保持程序运行(不建议修改)
         await asyncio.Event().wait()
     except Exception as e:
-        sdk.logger.error(f"测试过程中出错: {str(e)}", exc_info=True)
+        sdk.logger.error(f"发生错误: {e}", exc_info=True)
     except KeyboardInterrupt:
         sdk.logger.info("正在停止程序")
     finally:
         await sdk.adapter.shutdown()
+
 
 if __name__ == "__main__":
     asyncio.run(main())
