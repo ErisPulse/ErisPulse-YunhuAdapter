@@ -1041,7 +1041,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             bot = enabled_bots[0]
             _account_id = next((name for name, b in self.bots.items() if b == bot), "")
 
-        self.logger.error(f"Bot {_account_id} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}")
+        self.logger.debug(f"Bot {_account_id} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}")
 
         raw_response = await self._net_request("POST", endpoint, params, bot_token=bot.token)
 
