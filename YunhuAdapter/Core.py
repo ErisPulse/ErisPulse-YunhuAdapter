@@ -39,76 +39,12 @@ class YunhuAdapter(sdk.BaseAdapter):
         {!--< /tips >!--}
         """
         
-        # 方法名映射表（全小写 -> 实际方法名）
-        _METHOD_MAP = {
-            # 消息发送方法
-            "text": "Text",
-            "html": "Html",
-            "markdown": "Markdown",
-            "image": "Image",
-            "video": "Video",
-            "file": "File",
-            
-            # 批量和其他方法
-            "batch": "Batch",
-            "edit": "Edit",
-            "recall": "Recall",
-            "board": "Board",
-            "dismissboard": "DismissBoard",
-            "stream": "Stream",
-            
-            # 原始消息和转换
-            "raw_ob12": "Raw_ob12",
-            
-            # 链式修饰方法
-            "at": "At",
-            "reply": "Reply",
-            "buttons": "Buttons",
-        }
         
         def __init__(self, adapter, target_type=None, target_id=None, account_id=None):
             super().__init__(adapter, target_type, target_id, account_id)
             self._at_user_ids = []       # @的用户列表
             self._reply_message_id = None # 回复的消息ID (parent_id)
             self._buttons = None         # 按钮数据
-        
-        def __getattr__(self, name):
-            """
-            处理未定义的发送方法（支持大小写不敏感）
-            
-            当调用不存在的消息类型方法时：
-            1. 通过映射表查找对应的方法
-            2. 如果找到则调用该方法
-            3. 如果找不到，则发送文本提示不支持
-            """
-            name_lower = name.lower()
-            
-            # 查找映射
-            if name_lower in self._METHOD_MAP:
-                actual_method_name = self._METHOD_MAP[name_lower]
-                return getattr(self, actual_method_name)
-            
-            # 方法不存在，返回文本提示
-            def unsupported_method(*args, **kwargs):
-                params_info = []
-                for i, arg in enumerate(args):
-                    if isinstance(arg, bytes):
-                        params_info.append(f"args[{i}]: <bytes: {len(arg)} bytes>")
-                    else:
-                        params_info.append(f"args[{i}]: {repr(arg)[:100]}")
-                
-                for k, v in kwargs.items():
-                    if isinstance(v, bytes):
-                        params_info.append(f"{k}: <bytes: {len(v)} bytes>")
-                    else:
-                        params_info.append(f"{k}: {repr(v)[:100]}")
-                
-                params_str = ", ".join(params_info)
-                error_msg = f"[不支持的发送类型] 方法名: {name}, 参数: [{params_str}]"
-                
-                return self.Text(error_msg)
-            
-            return unsupported_method
         
         def At(self, user_id: str) -> 'Send':
             """
