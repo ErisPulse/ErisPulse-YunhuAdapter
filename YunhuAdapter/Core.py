@@ -564,6 +564,47 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self._adapter.logger.error(f"下载文件失败: {url}, 错误: {str(e)}")
                 return None, None
 
+        def _read_local_file(self, file_path: str, max_size: int = 100 * 1024 * 1024) -> tuple[Optional[bytes], Optional[str]]:
+            """
+            读取本地文件
+            
+            :param file_path: 文件路径
+            :param max_size: 最大文件大小（字节），默认100MB
+            :return: (文件内容, 文件名) 或 (None, None)
+            """
+            import os
+            
+            try:
+                # 检查文件是否存在
+                if not os.path.exists(file_path):
+                    self._adapter.logger.error(f"文件不存在: {file_path}")
+                    return None, None
+                
+                # 检查是否为文件
+                if not os.path.isfile(file_path):
+                    self._adapter.logger.error(f"路径不是文件: {file_path}")
+                    return None, None
+                
+                # 获取文件名
+                filename = os.path.basename(file_path)
+                
+                # 检查文件大小
+                file_size = os.path.getsize(file_path)
+                if file_size > max_size:
+                    self._adapter.logger.warning(f"文件过大: {file_size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)")
+                    return None, None
+                
+                # 读取文件
+                with open(file_path, 'rb') as f:
+                    file_data = f.read()
+                
+                self._adapter.logger.debug(f"文件读取完成: {len(file_data)} bytes, 文件名: {filename}")
+                return file_data, filename
+                
+            except Exception as e:
+                self._adapter.logger.error(f"读取文件失败: {file_path}, 错误: {str(e)}")
+                return None, None
+
         async def _upload_file_and_call_api(self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs):
             # 确定使用的bot
             bot_name = self._account_id
@@ -617,6 +658,32 @@ class YunhuAdapter(sdk.BaseAdapter):
                     file_name = downloaded_filename
                 
                 file = file_data
+            
+            # 处理本地文件路径
+            elif isinstance(file, str):
+                import os
+                # 检查是否是本地文件路径
+                if os.path.exists(file) and os.path.isfile(file):
+                    self._adapter.logger.info(f"检测到本地文件路径，开始读取: {file}")
+                    file_data, local_filename = self._read_local_file(file)
+                    
+                    if file_data is None:
+                        # 读取失败，发送文本提示
+                        error_msg = f"[文件发送失败] 无法发送文件: {file}\n原因: 文件不存在、过大或读取失败"
+                        return await self._adapter.call_api(
+                            endpoint="/bot/send",
+                            recvId=self._target_id,
+                            recvType=self._target_type,
+                            contentType="text",
+                            content={"text": error_msg},
+                            parentId=kwargs.get("parent_id", "")
+                        )
+                    
+                    # 使用本地文件名（如果未指定）
+                    if file_name is None and local_filename:
+                        file_name = local_filename
+                    
+                    file = file_data
             
             url = f"{self._adapter.base_url}{upload_endpoint}?token={bot.token}"
             
