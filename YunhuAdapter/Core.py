@@ -2,11 +2,17 @@ import asyncio
 import aiohttp
 import io
 import json
+import re
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import filetype
 from ErisPulse import sdk
 from ErisPulse.Core import router
+
+
+def _mask_token(url: str) -> str:
+    """安全地掩盖URL中的token参数"""
+    return re.sub(r'([?&]token=)[^&]*', r'\1***', url)
 
 @dataclass
 class YunhuBotConfig:
@@ -561,7 +567,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     return file_data, filename
                     
             except Exception as e:
-                self._adapter.logger.error(f"下载文件失败: {url}, 错误: {str(e)}")
+                self._adapter.logger.error(f"下载文件失败: {_mask_token(url)}, 错误: {str(e)}")
                 return None, None
 
         def _read_local_file(self, file_path: str, max_size: int = 100 * 1024 * 1024) -> tuple[Optional[bytes], Optional[str]]:
@@ -744,28 +750,29 @@ class YunhuAdapter(sdk.BaseAdapter):
 
             # 上传文件，增加超时时间
             timeout = aiohttp.ClientTimeout(total=600, connect=30)  # 10分钟总超时，30秒连接超时
-            async with self._adapter.session.post(url, data=data, timeout=timeout) as response:
-                # 检查响应状态
-                if response.status == 413:
-                    # 文件过大
-                    error_msg = f"[文件发送失败] 文件过大: {upload_filename}\n原因: 超过云湖服务器限制"
-                    return await self._adapter.call_api(
-                        endpoint="/bot/send",
-                        recvId=self._target_id,
-                        recvType=self._target_type,
-                        contentType="text",
-                        content={"text": error_msg},
-                        parentId=kwargs.get("parent_id", "")
-                    )
-                
-                # 尝试解析JSON
-                try:
-                    upload_res = await response.json()
-                except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-                    # 响应不是JSON格式，可能是错误页面
-                    error_text = await response.text()[:500]
-                    self._adapter.logger.error(f"上传响应非JSON格式: {error_text}")
-                    error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 服务器返回错误 (状态码: {response.status})"
+            try:
+                async with self._adapter.session.post(url, data=data, timeout=timeout) as response:
+                    # 检查响应状态
+                    if response.status == 413:
+                        # 文件过大
+                        error_msg = f"[文件发送失败] 文件过大: {upload_filename}\n原因: 超过云湖服务器限制"
+                        return await self._adapter.call_api(
+                            endpoint="/bot/send",
+                            recvId=self._target_id,
+                            recvType=self._target_type,
+                            contentType="text",
+                            content={"text": error_msg},
+                            parentId=kwargs.get("parent_id", "")
+                        )
+                    
+                    # 尝试解析JSON
+                    try:
+                        upload_res = await response.json()
+                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
+                        # 响应不是JSON格式，可能是错误页面
+                        error_text = await response.text()[:500]
+                        self._adapter.logger.error(f"上传响应非JSON格式: {error_text}")
+                        error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 服务器返回错误 (状态码: {response.status})"
                     return await self._adapter.call_api(
                         endpoint="/bot/send",
                         recvId=self._target_id,
@@ -789,6 +796,32 @@ class YunhuAdapter(sdk.BaseAdapter):
                 key_name = key_map.get(content_type, "fileKey")
                 if "data" not in upload_res or key_name not in upload_res["data"]:
                     raise ValueError("上传API返回的数据格式不正确")
+
+            except aiohttp.ServerTimeoutError:
+                self._adapter.logger.error(f"文件上传超时: {_mask_token(url)}")
+                error_msg = f"[文件发送失败] 上传超时: {upload_filename}"
+                return await self._adapter.call_api(
+                    endpoint="/bot/send",
+                    recvId=self._target_id,
+                    recvType=self._target_type,
+                    contentType="text",
+                    content={"text": error_msg},
+                    parentId=kwargs.get("parent_id", "")
+                )
+            except aiohttp.ClientError as e:
+                self._adapter.logger.error(f"文件上传失败: {_mask_token(url)}, 错误: {str(e)}")
+                error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 网络错误"
+                return await self._adapter.call_api(
+                    endpoint="/bot/send",
+                    recvId=self._target_id,
+                    recvType=self._target_type,
+                    contentType="text",
+                    content={"text": error_msg},
+                    parentId=kwargs.get("parent_id", "")
+                )
+            except Exception as e:
+                self._adapter.logger.error(f"文件上传异常: {_mask_token(url)}, 错误: {str(e)}")
+                raise
 
             # 构造API调用负载
             payload = {
@@ -909,22 +942,32 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         self.logger.debug(f"[{endpoint}]|[{method}] 请求数据: {json_data} | 参数: {params}")
 
-        async with self.session.request(
-            method,
-            url,
-            data=json_data,
-            params=params,
-            headers=headers
-        ) as response:
-            content_type = response.headers.get("Content-Type", "")
-            if "application/json" in content_type:
-                result = await response.json()
-                self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
-                return result
-            else:
-                text = await response.text()
-                self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}")
-                return {"error": "Invalid content type", "content_type": content_type, "status": response.status, "raw": text}
+        try:
+            async with self.session.request(
+                method,
+                url,
+                data=json_data,
+                params=params,
+                headers=headers
+            ) as response:
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" in content_type:
+                    result = await response.json()
+                    self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
+                    return result
+                else:
+                    text = await response.text()
+                    self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}")
+                    return {"error": "Invalid content type", "content_type": content_type, "status": response.status, "raw": text}
+        except aiohttp.ServerTimeoutError as e:
+            self.logger.error(f"请求超时: {_mask_token(url)}")
+            raise
+        except aiohttp.ClientError as e:
+            self.logger.error(f"网络请求失败: {_mask_token(url)}, 错误: {str(e)}")
+            raise
+        except Exception as e:
+            self.logger.error(f"请求异常: {_mask_token(url)}, 错误: {str(e)}")
+            raise
 
     async def send_stream(self, conversation_type: str, target_id: str, content_type: str, content_generator, **kwargs) -> Dict:
         """
@@ -977,8 +1020,18 @@ class YunhuAdapter(sdk.BaseAdapter):
         if not self.session:
             self.session = aiohttp.ClientSession()
         headers = {"Content-Type": "text/plain"}
-        async with self.session.post(full_url, headers=headers, data=content_generator) as response:
-            raw_response = await response.json()
+        try:
+            async with self.session.post(full_url, headers=headers, data=content_generator) as response:
+                raw_response = await response.json()
+        except aiohttp.ServerTimeoutError:
+            self.logger.error(f"流式消息发送超时: {_mask_token(url)}")
+            raise
+        except aiohttp.ClientError as e:
+            self.logger.error(f"流式消息发送失败: {_mask_token(url)}, 错误: {str(e)}")
+            raise
+        except Exception as e:
+            self.logger.error(f"流式消息发送异常: {_mask_token(url)}, 错误: {str(e)}")
+            raise
             
             # 标准化为 OneBot12 响应格式
             standardized = {
