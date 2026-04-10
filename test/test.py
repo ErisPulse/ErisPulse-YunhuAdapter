@@ -39,8 +39,8 @@ class TestConfig:
     # 单独启用的测试（列表形式）
     # 例如：[1, 6, 7] 表示只运行测试1、6和7
     # 如果为空列表，则根据上面的 bool 配置运行
-    # specific_tests: List[int] = field(default_factory=list)
-    specific_tests = [13]
+    specific_tests: List[int] = field(default_factory=list)
+    # specific_tests = [13]
     
     # URL 配置
     image_url: str = "https://http.cat/200"
