@@ -7,38 +7,38 @@
 {!--< /tips >!--}
 """
 
+import re
 import time
 import uuid
 from ErisPulse.Core import logger
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
 
 class YunhuConverter:
     def __init__(self):
         self._setup_event_mapping()
-    
+
     def _setup_event_mapping(self):
         """初始化事件类型映射 (符合OneBot12标准)"""
         self.event_map = {
             # 标准消息事件
             "message.receive.normal": "message",
             "message.receive.instruction": "message",
-            
             # 标准通知事件
             "bot.followed": "notice.friend_increase",
             "bot.unfollowed": "notice.friend_decrease",
             "group.join": "notice.group_member_increase",
             "group.leave": "notice.group_member_decrease",
-            
             # 云湖特有事件（添加yunhu_前缀）
             "button.report.inline": "notice.yunhu_button_click",
             "bot.shortcut.menu": "notice.yunhu_shortcut_menu",
-            "bot.setting": "notice.yunhu_bot_setting"
+            "bot.setting": "notice.yunhu_bot_setting",
         }
 
     def convert(self, data: Dict, bot_id: str = None) -> Optional[Dict]:
         """
         主转换方法
-        
+
         :param data: 原始事件数据
         :param bot_id: 机器人ID（用于设置self.user_id）
         :return: 符合OneBot12标准的事件字典
@@ -51,7 +51,7 @@ class YunhuConverter:
 
         if not event_type:
             raise ValueError("事件数据缺少eventType字段")
-        
+
         onebot_event = {
             "id": header.get("eventId", str(uuid.uuid4())),
             "time": int(header.get("eventTime", time.time() * 1000) / 1000),
@@ -61,13 +61,13 @@ class YunhuConverter:
             "platform": "yunhu",
             "self": {
                 "platform": "yunhu",
-                "user_id": bot_id if bot_id else ""  # 使用传入的bot_id
+                "user_id": bot_id if bot_id else "",  # 使用传入的bot_id
             },
             # 基础字段：用户昵称
             "user_nickname": "",
             # 扩展字段：保留原始数据和原始事件类型
             "yunhu_raw": data,
-            "yunhu_raw_type": event_type
+            "yunhu_raw_type": event_type,
         }
 
         mapped_type = self.event_map.get(event_type, "")
@@ -87,221 +87,264 @@ class YunhuConverter:
             "notice.group_member_decrease": self._handle_group_member_event,
             "notice.yunhu_button_click": self._handle_button_event,
             "notice.yunhu_shortcut_menu": self._handle_menu_event,
-            "notice.yunhu_bot_setting": self._handle_setting_event
+            "notice.yunhu_bot_setting": self._handle_setting_event,
         }
-        
-        handler = handler_map.get(mapped_type)
-        return handler(event_type, data.get("event", {}), onebot_event) if handler else None
 
-    def _handle_message_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
-        """
-        处理消息事件 (严格遵循OneBot12消息格式)
-        
-        改进点：
-        1. 统一消息段结构
-        2. 标准内容类型直接转换
-        3. 云湖特有内容类型添加yunhu_前缀
-        """
+        handler = handler_map.get(mapped_type)
+        return (
+            handler(event_type, data.get("event", {}), onebot_event)
+            if handler
+            else None
+        )
+
+    def _handle_message_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
         msg_data = event_data.get("message", {})
         sender = event_data.get("sender", {})
         chat_info = event_data.get("chat", {})
         content_type = msg_data.get("contentType", "text")
-        
-        # 构建标准消息段
-        message_segments = []
-        alt_message = []
-        
-        # 处理文本内容
+        content = msg_data.get("content", {})
+
+        at_user_ids: List[str] = content.get("at", [])
+        mention_segments = [
+            {"type": "mention", "data": {"user_id": str(uid), "user_name": ""}}
+            for uid in at_user_ids
+        ]
+
+        message_segments: list = []
+        alt_message: list = []
+
         if content_type == "text":
-            text = msg_data.get("content", {}).get("text", "")
+            text = content.get("text", "")
+            if at_user_ids:
+                text = self._strip_at_text(text)
             if text:
                 message_segments.append({"type": "text", "data": {"text": text}})
                 alt_message.append(text)
-        
-        # 处理媒体内容 (标准类型)
+
         elif content_type == "image":
-            media_data = self._build_media_data(msg_data.get("content", {}), "image")
+            media_data = self._build_media_data(content, "image")
             message_segments.append({"type": "image", "data": media_data})
             alt_message.append(f"[图片:{media_data.get('file_name', '')}]")
-        
+
         elif content_type == "video":
-            media_data = self._build_media_data(msg_data.get("content", {}), "video")
+            media_data = self._build_media_data(content, "video")
             message_segments.append({"type": "video", "data": media_data})
             alt_message.append(f"[视频:{media_data.get('file_name', '')}]")
-        
+
         elif content_type == "file":
-            media_data = self._build_media_data(msg_data.get("content", {}), "file")
+            media_data = self._build_media_data(content, "file")
             message_segments.append({"type": "file", "data": media_data})
             alt_message.append(f"[文件:{media_data.get('file_name', '')}]")
-        
-        # 处理云湖特有内容类型
+
         elif content_type == "form":
-            form_data = self._build_form_data(msg_data.get("content", {}), msg_data)
+            form_data = self._build_form_data(content, msg_data)
             message_segments.append({"type": "yunhu_form", "data": form_data})
             alt_message.append(f"[表单:{form_data.get('name', '')}]")
-        
-        # 处理按钮 (云湖扩展)
-        buttons = msg_data.get("content", {}).get("buttons")
+
+        buttons = content.get("buttons")
         if buttons:
-            message_segments.append({
-                "type": "yunhu_button",
-                "data": {"buttons": buttons}
-            })
+            message_segments.append(
+                {"type": "yunhu_button", "data": {"buttons": buttons}}
+            )
             alt_message.append("[按钮]")
-        
-        # 设置聊天类型 (OneBot12标准)
+
+        message_segments = mention_segments + message_segments
+
         chat_type = chat_info.get("chatType", "")
         base_event["detail_type"] = "private" if chat_type == "bot" else "group"
 
-        # 构建最终消息事件
-        base_event.update({
-            "type": "message",
-            "message_id": msg_data.get("msgId", ""),
-            "message": message_segments,
-            "alt_message": "".join(alt_message),
-            "user_id": sender.get("senderId", ""),
-            "user_nickname": sender.get("senderNickname", "")
-        })
+        base_event.update(
+            {
+                "type": "message",
+                "message_id": msg_data.get("msgId", ""),
+                "message": message_segments,
+                "alt_message": "".join(alt_message),
+                "user_id": sender.get("senderId", ""),
+                "user_nickname": sender.get("senderNickname", ""),
+            }
+        )
 
-        # 设置群聊ID
         if base_event["detail_type"] == "group":
             base_event["group_id"] = chat_info.get("chatId", "")
-        # 私聊时保持使用配置的bot_id，不使用chatId作为self.user_id
-        # 因为云湖的chatId在不同场景下可能有不同含义，而我们需要明确的机器人标识
-        
-        # 处理指令消息 (云湖扩展)
+
         if "receive.instruction" in event_type:
             command_data = self._build_command_data(
-                content=msg_data.get("content", {}),
+                content=content,
                 message_event=msg_data,
-                content_type=content_type
+                content_type=content_type,
             )
             logger.debug(f"Received command: {command_data}")
             base_event["yunhu_command"] = command_data
-            
-            # 更新alt_message以包含完整指令格式
+
             if command_data and content_type == "text":
                 command_name = command_data.get("name", "")
                 args = command_data.get("args", "")
                 if command_name:
                     base_event["alt_message"] = f"/{command_name} {args}".strip()
-        
+
         return base_event
-    def _handle_friend_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
+
+    @staticmethod
+    def _strip_at_text(text: str) -> str:
+        """移除文本中的 @昵称 部分"""
+        return re.sub(r"@[\S]+\s*", "", text).strip()
+
+    def _handle_friend_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
         """
         处理机器人订阅关系变更事件
         """
-        base_event.update({
-            "type": "notice",
-            "detail_type": "friend_increase" if event_type == "bot.followed" else "friend_decrease",
-            "user_id": event_data.get("userId", ""),
-            "user_nickname": event_data.get("nickname", "")
-        })
+        base_event.update(
+            {
+                "type": "notice",
+                "detail_type": "friend_increase"
+                if event_type == "bot.followed"
+                else "friend_decrease",
+                "user_id": event_data.get("userId", ""),
+                "user_nickname": event_data.get("nickname", ""),
+            }
+        )
         return base_event
-    def _handle_group_member_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
+
+    def _handle_group_member_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
         """
         处理群成员变更事件
         """
-        base_event.update({
-            "type": "notice",
-            "detail_type": "group_member_increase" if event_type == "group.join" else "group_member_decrease",
-            "sub_type": "invite" if event_type == "group.join" else "leave",
-            "group_id": event_data.get("chatId", ""),
-            "user_id": event_data.get("userId", ""),
-            "user_nickname": event_data.get("nickname", ""),
-            "operator_id": ""
-        })
+        base_event.update(
+            {
+                "type": "notice",
+                "detail_type": "group_member_increase"
+                if event_type == "group.join"
+                else "group_member_decrease",
+                "sub_type": "invite" if event_type == "group.join" else "leave",
+                "group_id": event_data.get("chatId", ""),
+                "user_id": event_data.get("userId", ""),
+                "user_nickname": event_data.get("nickname", ""),
+                "operator_id": "",
+            }
+        )
         return base_event
 
-    def _handle_button_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
+    def _handle_button_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
         """
         处理按钮点击事件
         """
-        base_event.update({
-            "type": "notice",
-            "detail_type": "yunhu_button_click",
-            "user_id": event_data.get("userId", ""),
-            "user_nickname": event_data.get("nickname", ""),
-            "message_id": event_data.get("msgId", ""),
-            "yunhu_button": {
-                "id": event_data.get("buttonId", ""),
-                "value": event_data.get("value", "")
+        base_event.update(
+            {
+                "type": "notice",
+                "detail_type": "yunhu_button_click",
+                "user_id": event_data.get("userId", ""),
+                "user_nickname": event_data.get("nickname", ""),
+                "message_id": event_data.get("msgId", ""),
+                "yunhu_button": {
+                    "id": event_data.get("buttonId", ""),
+                    "value": event_data.get("value", ""),
+                },
             }
-        })
+        )
         return base_event
 
-    def _handle_menu_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
+    def _handle_menu_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
         """
         处理快捷菜单事件
         """
-        base_event.update({
-            "type": "notice",
-            "detail_type": "yunhu_shortcut_menu",
-            "user_id": event_data.get("senderId", ""),
-            "user_nickname": event_data.get("nickname", ""),
-            "group_id": event_data.get("chatId", "") if event_data.get("chatType") == "group" else "",
-            "yunhu_menu": {
-                "id": event_data.get("menuId", ""),
-                "type": event_data.get("menuType", 1),
-                "action": event_data.get("menuAction", 1)
+        base_event.update(
+            {
+                "type": "notice",
+                "detail_type": "yunhu_shortcut_menu",
+                "user_id": event_data.get("senderId", ""),
+                "user_nickname": event_data.get("nickname", ""),
+                "group_id": event_data.get("chatId", "")
+                if event_data.get("chatType") == "group"
+                else "",
+                "yunhu_menu": {
+                    "id": event_data.get("menuId", ""),
+                    "type": event_data.get("menuType", 1),
+                    "action": event_data.get("menuAction", 1),
+                },
             }
-        })
+        )
         return base_event
 
-    def _handle_setting_event(self, event_type: str, event_data: Dict, base_event: Dict) -> Dict:
+    def _handle_setting_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
         """
         处理机器人设置事件
         """
-        base_event.update({
-            "type": "notice",
-            "detail_type": "yunhu_bot_setting",
-            "group_id": event_data.get("groupId", ""),
-            "user_nickname": event_data.get("nickname", ""),
-            "yunhu_setting": event_data.get("settingJson", {})
-        })
+        base_event.update(
+            {
+                "type": "notice",
+                "detail_type": "yunhu_bot_setting",
+                "group_id": event_data.get("groupId", ""),
+                "user_nickname": event_data.get("nickname", ""),
+                "yunhu_setting": event_data.get("settingJson", {}),
+            }
+        )
         return base_event
+
     def _build_media_data(self, content: Dict, media_type: str) -> Dict:
         """构建标准媒体数据 (OneBot12兼容)"""
         media_map = {
             "image": ("imageUrl", "imageName", "imageWidth", "imageHeight"),
-            "video": ("videoUrl", "videoName", "videoWidth", "videoHeight", "videoDuration"),
-            "file": ("fileUrl", "fileName", "fileSize")
+            "video": (
+                "videoUrl",
+                "videoName",
+                "videoWidth",
+                "videoHeight",
+                "videoDuration",
+            ),
+            "file": ("fileUrl", "fileName", "fileSize"),
         }
-        
+
         url_key, name_key, *extra_keys = media_map[media_type]
         media_data = {
             "file_id": content.get(url_key, ""),
             "url": content.get(url_key, ""),
-            "file_name": content.get(name_key, "")
+            "file_name": content.get(name_key, ""),
         }
-        
+
         # 添加类型特定字段
         if media_type == "image":
-            media_data.update({
-                "width": content.get(extra_keys[0], 0),
-                "height": content.get(extra_keys[1], 0)
-            })
+            media_data.update(
+                {
+                    "width": content.get(extra_keys[0], 0),
+                    "height": content.get(extra_keys[1], 0),
+                }
+            )
         elif media_type == "video":
-            media_data.update({
-                "width": content.get(extra_keys[0], 0),
-                "height": content.get(extra_keys[1], 0),
-                "duration": content.get(extra_keys[2], 0)
-            })
+            media_data.update(
+                {
+                    "width": content.get(extra_keys[0], 0),
+                    "height": content.get(extra_keys[1], 0),
+                    "duration": content.get(extra_keys[2], 0),
+                }
+            )
         elif media_type == "file":
             media_data["size"] = content.get(extra_keys[0], 0)
-            
+
         return media_data
+
     def _build_form_data(self, content: Dict, message_event: Dict) -> Dict:
         """
         构建表单消息数据
         """
         form_json = content.get("formJson", {})
         form_data = []
-        
+
         for field_id, field_data in form_json.items():
             field_type = field_data.get("type", "")
             field_value = ""
-            
+
             if field_type == "input":
                 field_value = field_data.get("value", "")
             elif field_type == "switch":
@@ -309,38 +352,50 @@ class YunhuConverter:
             elif field_type == "checkbox":
                 selected = field_data.get("selectStatus", [])
                 values = field_data.get("selectValues", [])
-                field_value = ",".join([v for i, v in enumerate(values) if i < len(selected) and selected[i]])
+                field_value = ",".join(
+                    [
+                        v
+                        for i, v in enumerate(values)
+                        if i < len(selected) and selected[i]
+                    ]
+                )
             elif field_type == "textarea":
                 field_value = field_data.get("value", "")
             elif field_type == "select":
                 field_value = field_data.get("selectValue", "")
             elif field_type == "radio":
                 field_value = field_data.get("selectValue", "")
-            
-            form_data.append({
-                "id": field_id,
-                "type": field_type,
-                "label": field_data.get("label", ""),
-                "value": field_value
-            })
-        
+
+            form_data.append(
+                {
+                    "id": field_id,
+                    "type": field_type,
+                    "label": field_data.get("label", ""),
+                    "value": field_value,
+                }
+            )
+
         return {
             "id": message_event.get("instructionId", ""),
             "name": message_event.get("instructionName", ""),
-            "fields": form_data
+            "fields": form_data,
         }
 
-    def _build_command_data(self, content: Dict, message_event: Dict, content_type: str) -> Dict:
+    def _build_command_data(
+        self, content: Dict, message_event: Dict, content_type: str
+    ) -> Dict:
         """
         构建指令数据
         """
         command_data = {
             "name": message_event.get("commandName", ""),
             "id": str(message_event.get("commandId", 0)),
-            "args": content.get("text", "").replace(f"/{message_event.get('commandName', '')}", "").strip()
+            "args": content.get("text", "")
+            .replace(f"/{message_event.get('commandName', '')}", "")
+            .strip(),
         }
-        
+
         if content_type == "form":
             command_data["form"] = content.get("formJson", {})
-        
+
         return command_data
