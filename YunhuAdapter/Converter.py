@@ -107,16 +107,23 @@ class YunhuConverter:
         content = msg_data.get("content", {})
 
         at_user_ids: List[str] = content.get("at", [])
-        mention_segments = [
-            {"type": "mention", "data": {"user_id": str(uid), "user_name": ""}}
-            for uid in at_user_ids
-        ]
+        raw_text = content.get("text", "") if content_type == "text" else ""
+        at_names = re.findall(r'@([\S]+)', raw_text)
+        mention_segments = []
+        for i, uid in enumerate(at_user_ids):
+            mention_segments.append({
+                "type": "mention",
+                "data": {
+                    "user_id": str(uid),
+                    "user_name": at_names[i] if i < len(at_names) else ""
+                }
+            })
 
         message_segments: list = []
         alt_message: list = []
 
         if content_type == "text":
-            text = content.get("text", "")
+            text = raw_text
             if at_user_ids:
                 text = self._strip_at_text(text)
             if text:
