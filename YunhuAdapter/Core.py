@@ -71,13 +71,14 @@ class YunhuAdapter(sdk.BaseAdapter):
             self._reply_message_id = None
             self._buttons = None
 
-        def _build_content_with_modifiers(self, text: str, content_type: str) -> Dict:
+        def _build_content_with_modifiers(self, text: str, content_type: str, buttons: List = None) -> Dict:
             result = {"text": text}
             if self._at_user_ids:
                 at_text = " ".join([f"@{uid}" for uid in self._at_user_ids])
                 result["text"] = at_text + " " + result["text"]
-            if self._buttons is not None:
-                result["buttons"] = self._buttons
+            resolved_buttons = self._buttons if self._buttons is not None else buttons
+            if resolved_buttons is not None:
+                result["buttons"] = resolved_buttons
             return result
 
         def _get_parent_id(self, param_parent_id: str = "") -> str:
@@ -90,43 +91,37 @@ class YunhuAdapter(sdk.BaseAdapter):
         def _get_buttons(self, param_buttons: List = None):
             return self._buttons if self._buttons is not None else param_buttons
 
-        def Text(self, text: str, buttons: List = None, parent_id: str = ""):
+        def Text(self, text: str):
             return self.Raw_ob12(
                 [
                     {
                         "type": "text",
                         "data": {
                             "text": text,
-                            "buttons": buttons,
-                            "parent_id": parent_id,
                         },
                     }
                 ]
             )
 
-        def Html(self, html: str, buttons: List = None, parent_id: str = ""):
+        def Html(self, html: str):
             return self.Raw_ob12(
                 [
                     {
                         "type": "html",
                         "data": {
                             "html": html,
-                            "buttons": buttons,
-                            "parent_id": parent_id,
                         },
                     }
                 ]
             )
 
-        def Markdown(self, markdown: str, buttons: List = None, parent_id: str = ""):
+        def Markdown(self, markdown: str):
             return self.Raw_ob12(
                 [
                     {
                         "type": "markdown",
                         "data": {
                             "markdown": markdown,
-                            "buttons": buttons,
-                            "parent_id": parent_id,
                         },
                     }
                 ]
@@ -135,8 +130,6 @@ class YunhuAdapter(sdk.BaseAdapter):
         def Image(
             self,
             file,
-            buttons: List = None,
-            parent_id: str = "",
             stream: bool = False,
             filename: str = None,
         ):
@@ -146,8 +139,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                         "type": "image",
                         "data": {
                             "file": file,
-                            "buttons": buttons,
-                            "parent_id": parent_id,
                             "stream": stream,
                             "filename": filename,
                         },
@@ -158,8 +149,6 @@ class YunhuAdapter(sdk.BaseAdapter):
         def Video(
             self,
             file,
-            buttons: List = None,
-            parent_id: str = "",
             stream: bool = False,
             filename: str = None,
         ):
@@ -169,8 +158,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                         "type": "video",
                         "data": {
                             "file": file,
-                            "buttons": buttons,
-                            "parent_id": parent_id,
                             "stream": stream,
                             "filename": filename,
                         },
@@ -181,8 +168,6 @@ class YunhuAdapter(sdk.BaseAdapter):
         def File(
             self,
             file,
-            buttons: List = None,
-            parent_id: str = "",
             stream: bool = False,
             filename: str = None,
         ):
@@ -192,8 +177,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                         "type": "file",
                         "data": {
                             "file": file,
-                            "buttons": buttons,
-                            "parent_id": parent_id,
                             "stream": stream,
                             "filename": filename,
                         },
@@ -464,8 +447,6 @@ class YunhuAdapter(sdk.BaseAdapter):
 
             elif seg_type == "markdown":
                 markdown_text = seg_data.get("markdown", "")
-                if buttons is None and "buttons" in seg_data:
-                    buttons = seg_data["buttons"]
                 return await self._do_send_text_like(
                     markdown_text,
                     "markdown",
@@ -516,7 +497,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     else self._target_id,
                     recvType=self._target_type,
                     contentType="text",
-                    content=self._build_content_with_modifiers(text, "text"),
+                    content=self._build_content_with_modifiers(text, "text", buttons=buttons),
                     parentId=self._get_parent_id(parent_id),
                 )
             )
@@ -548,7 +529,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     else self._target_id,
                     recvType=self._target_type,
                     contentType=content_type,
-                    content=self._build_content_with_modifiers(text, content_type),
+                    content=self._build_content_with_modifiers(text, content_type, buttons=buttons),
                     parentId=self._get_parent_id(parent_id),
                 )
             )
@@ -1174,33 +1155,33 @@ class YunhuAdapter(sdk.BaseAdapter):
             self.logger.error(f"流式消息发送异常: {_mask_token(url)}, 错误: {str(e)}")
             raise
 
-            # 标准化为 OneBot12 响应格式
-            standardized = {
-                "status": "ok" if raw_response.get("code") == 1 else "failed",
-                "retcode": 0
-                if raw_response.get("code") == 1
-                else 34000 + (raw_response.get("code") or 0),
-                "data": raw_response.get("data"),
-                "message": raw_response.get("msg", ""),
-                "yunhu_raw": raw_response,
-                "self": {"user_id": bot.bot_id},  # 使用bot_id标识机器人账号
-            }
+        # 标准化为 OneBot12 响应格式
+        standardized = {
+            "status": "ok" if raw_response.get("code") == 1 else "failed",
+            "retcode": 0
+            if raw_response.get("code") == 1
+            else 34000 + (raw_response.get("code") or 0),
+            "data": raw_response.get("data"),
+            "message": raw_response.get("msg", ""),
+            "yunhu_raw": raw_response,
+            "self": {"user_id": bot.bot_id},  # 使用bot_id标识机器人账号
+        }
 
-            # 如果成功，提取消息ID
-            if raw_response.get("code") == 1:
-                data = raw_response.get("data", {})
-                standardized["message_id"] = (
-                    data.get("messageInfo", {}).get("msgId", "")
-                    if "messageInfo" in data
-                    else data.get("msgId", "")
-                )
-            else:
-                standardized["message_id"] = ""
+        # 如果成功，提取消息ID
+        if raw_response.get("code") == 1:
+            data = raw_response.get("data", {})
+            standardized["message_id"] = (
+                data.get("messageInfo", {}).get("msgId", "")
+                if "messageInfo" in data
+                else data.get("msgId", "")
+            )
+        else:
+            standardized["message_id"] = ""
 
-            if "echo" in kwargs:
-                standardized["echo"] = kwargs["echo"]
+        if "echo" in kwargs:
+            standardized["echo"] = kwargs["echo"]
 
-            return standardized
+        return standardized
 
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
         """

@@ -1,5 +1,111 @@
 # 云湖适配器与OneBot12协议的转换对照
 
+## 云湖特有事件类型
+
+云湖平台提供以下特有事件类型，可在消息处理中检测使用：
+
+### 1. 普通消息事件
+- **eventType**: `message.receive.normal`
+- **说明**: 用户发送的普通消息（文本、图片、视频、文件、表情包等）
+- **转换后**: OneBot12 `message` 事件，`detail_type` 为 `private` 或 `group`
+
+### 2. 指令消息事件
+- **eventType**: `message.receive.instruction`
+- **说明**: 用户发送的表单指令消息，包含结构化表单数据
+- **转换后**: OneBot12 `message` 事件，包含 `yunhu_command` 字段和 `yunhu_form` 消息段
+
+### 3. 关注机器人事件
+- **eventType**: `bot.followed`
+- **说明**: 用户关注/添加机器人为好友
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `friend_increase`
+
+### 4. 取消关注机器人事件
+- **eventType**: `bot.unfollowed`
+- **说明**: 用户取消关注/删除机器人好友
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `friend_decrease`
+
+### 5. 加入群事件
+- **eventType**: `group.join`
+- **说明**: 用户加入机器人所在的群
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `group_member_increase`
+
+### 6. 退出群事件
+- **eventType**: `group.leave`
+- **说明**: 用户退出机器人所在的群
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `group_member_decrease`
+
+### 7. 消息中按钮点击事件
+- **eventType**: `button.report.inline`
+- **说明**: 用户点击消息中的按钮（仅 `actionType=3` 点击汇报类型会触发）
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `yunhu_button_click`
+
+### 8. 快捷菜单事件
+- **eventType**: `bot.shortcut.menu`
+- **说明**: 用户触发快捷菜单
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `yunhu_shortcut_menu`
+
+### 9. 机器人设置事件
+- **eventType**: `bot.setting`
+- **说明**: 用户在群中修改机器人设置
+- **转换后**: OneBot12 `notice` 事件，`detail_type` 为 `yunhu_bot_setting`
+
+### 事件处理示例
+
+```python
+from ErisPulse.Core.Event import notice, message
+
+# 处理普通消息
+@message.on_message()
+async def handle_message(event):
+    if event.get("detail_type") == "group":
+        text = event.get_text()
+        # 处理群消息...
+    else:
+        # 处理私聊消息...
+
+# 处理通知事件（包括所有云湖特有事件）
+@notice.on_notice()
+async def handle_notice(event):
+    detail_type = event.get("detail_type")
+
+    if detail_type == "friend_increase":
+        # 新用户关注机器人
+        user_id = event.get_user_id()
+        await event.reply("欢迎关注！")
+
+    elif detail_type == "friend_decrease":
+        # 用户取消关注
+        user_id = event.get_user_id()
+
+    elif detail_type == "group_member_increase":
+        # 新成员加群
+        group_id = event.get_group_id()
+        user_id = event.get_user_id()
+        await event.reply(f"欢迎新成员 {event.get_user_nickname()}！")
+
+    elif detail_type == "group_member_decrease":
+        # 成员退群
+        group_id = event.get_group_id()
+
+    elif detail_type == "yunhu_button_click":
+        # 按钮点击事件
+        user_id = event.get_user_id()
+        button_value = event.get("yunhu_button", {}).get("value", "")
+        await event.reply(f"你点击了: {button_value}")
+
+    elif detail_type == "yunhu_shortcut_menu":
+        # 快捷菜单事件
+        menu_info = event.get("yunhu_menu", {})
+        menu_id = menu_info.get("id", "")
+
+    elif detail_type == "yunhu_bot_setting":
+        # 机器人设置变更
+        settings = event.get("yunhu_setting", {})
+        group_id = event.get("group_id", "")
+```
+
+---
+
 ### 1. 文本消息（普通消息）
 
 原始事件:
@@ -737,4 +843,159 @@
     "action": 1
   }
 }
+```
+
+---
+
+## 云湖发送消息类型（OneBot12扩展）
+
+云湖适配器支持使用 OneBot12 消息段格式发送消息，支持以下类型：
+
+### 1. 基础消息类型
+
+| 类型 | 说明 | 参数 |
+|------|------|------|
+| `text` | 纯文本 | `text`: 文本内容 |
+| `html` | HTML格式 | `html`: HTML代码 |
+| `markdown` | Markdown格式 | `markdown`: Markdown代码 |
+
+### 2. 媒体消息类型
+
+| 类型 | 说明 | 参数 |
+|------|------|------|
+| `image` | 图片 | `file`: 文件/URL, `stream`: 是否流式, `filename`: 文件名 |
+| `video` | 视频 | `file`: 文件/URL, `stream`: 是否流式, `filename`: 文件名 |
+| `file` | 文件 | `file`: 文件/URL, `stream`: 是否流式, `filename`: 文件名 |
+| `audio` | 语音/音频 | `file`: 文件/URL, `stream`: 是否流式, `filename`: 文件名 |
+
+### 3. 云湖特有类型
+
+| 类型 | 说明 | 参数 |
+|------|------|------|
+| `yunhu_expression` | 表情包/贴纸 | `sticker_id`: 贴纸ID, `sticker_pack_id`: 贴纸包ID |
+| `yunhu_button` | 按钮 | ��下方按钮格式 |
+| `reply` | 回复消息 | `message_id`: 消息ID |
+| `mention` | @用户 | `user_id`: 用户ID |
+
+### 按钮格式
+
+```python
+# 按钮格式示例
+buttons = [
+    [
+        {"text": "按钮文字", "actionType": 1, "url": "http://example.com"},      # 跳转URL
+        {"text": "复制", "actionType": 2, "value": "复制的内容"},              # 复制到剪贴板
+        {"text": "确认", "actionType": 3, "value": "confirm"}               # 点击汇报
+    ]
+]
+
+# 使用 Raw_ob12 发送带按钮消息
+message = [
+    {"type": "text", "data": {"text": "请确认操作"}},
+    {"type": "yunhu_button", "data": {"buttons": buttons}}
+]
+await yunhu.Send.To("group", group_id).Raw_ob12(message)
+```
+
+### 4. 流式消息类型
+
+云湖支持流式消息发送，适合长文本或大文件的渐进式发送：
+
+```python
+async def text_generator():
+    """文本流式生成器"""
+    for i in range(10):
+        yield f"第 {i+1} 行内容\n"
+        await asyncio.sleep(0.5)
+
+# 发送流式文本消息
+await yunhu.Send.To("group", group_id).Stream(
+    content_type="text",
+    content_generator=text_generator()
+)
+```
+
+#### 支持的流式类型
+
+| content_type | 说明 |
+|------------|------|
+| `text` | 流式文本 |
+| `markdown` | 流式Markdown |
+| `html` | 流式HTML |
+
+### 5. 使用链式调用发送
+
+```python
+# 基础发送
+await yunhu.Send.To("group", "123").Text("Hello")
+
+# 发送带@的消息
+await yunhu.Send.To("group", "123").At("user1").At("user2").Text("@成员")
+
+# 发送带按钮的消息
+buttons = [[{"text": "确认", "actionType": 3, "value": "ok"}]]
+await yunhu.Send.To("group", "123").Buttons(buttons).Text("请确认")
+
+# 发送回复消息
+await yunhu.Send.To("group", "123").Reply("msg_id").Text("回复内容")
+
+# 组合使用
+await yunhu.Send.To("group", "123").Reply("msg_id").At("user1").Buttons(buttons).Text("复合消息")
+
+# 使用 Raw_ob12 发送复杂消息
+message = [
+    {"type": "text", "data": {"text": "第一行"}},
+    {"type": "image", "data": {"file": "http://example.com/img.jpg"}},
+    {"type": "text", "data": {"text": "第二行"}}
+]
+await yunhu.Send.To("group", "123").Raw_ob12(message)
+```
+
+### 6. 批量发送
+
+```python
+# 批量发送到用户列表
+user_ids = ["user1", "user2", "user3"]
+await yunhu.Send.To("user", user_ids).Text("批量消息")
+
+# 批量发送到群列表
+group_ids = ["group1", "group2"]
+await yunhu.Send.To("group", group_ids).Text("群发消息")
+```
+
+### 7. 消息操作
+
+```python
+# 撤回消息
+await yunhu.Send.To("group", "123").Recall("message_id")
+
+# 编辑消息
+await yunhu.Send.To("group", "123").Edit(
+    msg_id="message_id",
+    text="新内容",
+    content_type="text",
+    buttons=buttons
+)
+```
+
+### 8. 公告看板
+
+```python
+# 发布本地公告（指定群）
+await yunhu.Send.To("group", "123").Board(
+    scope="local",
+    content="公告内容",
+    content_type="text"
+)
+
+# 发布全局公告
+await yunhu.Send.Board(
+    scope="global",
+    content="全局公告",
+    content_type="text"
+)
+
+# 撤销公告
+await yunhu.Send.To("group", "123").DismissBoard(scope="local")
+await yunhu.Send.DismissBoard(scope="global")
 ```

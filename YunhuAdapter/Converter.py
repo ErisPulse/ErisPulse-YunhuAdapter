@@ -145,6 +145,22 @@ class YunhuConverter:
             message_segments.append({"type": "file", "data": media_data})
             alt_message.append(f"[文件:{media_data.get('file_name', '')}]")
 
+        elif content_type == "expression":
+            expression_data = {
+                "sticker_id": str(content.get("stickerId", "")),
+                "sticker_pack_id": str(content.get("stickerPackId", "")),
+                "expression_id": str(content.get("expressionId", "")),
+                "image_name": content.get("imageName", ""),
+            }
+            if content.get("imageWidth"):
+                expression_data["width"] = content.get("imageWidth", 0)
+            if content.get("imageHeight"):
+                expression_data["height"] = content.get("imageHeight", 0)
+            message_segments.append(
+                {"type": "yunhu_expression", "data": expression_data}
+            )
+            alt_message.append(f"[表情:{content.get('stickerId', '')}]")
+
         elif content_type == "form":
             form_data = self._build_form_data(content, msg_data)
             message_segments.append({"type": "yunhu_form", "data": form_data})

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from ErisPulse import sdk
-
+from ErisPulse.Core.Event import notice
 
 @dataclass
 class TestConfig:
@@ -35,12 +35,13 @@ class TestConfig:
     enable_chain_tests: bool = True  # 链式调用测试（20-24）
     enable_mention_tests: bool = True  # @功能测试（25-26）
     enable_recall_tests: bool = True  # 撤回测试（27）
+    enable_button_tests: bool = True  # 按钮测试（28-29）
     
     # 单独启用的测试（列表形式）
     # 例如：[1, 6, 7] 表示只运行测试1、6和7
     # 如果为空列表，则根据上面的 bool 配置运行
-    specific_tests: List[int] = field(default_factory=list)
-    # specific_tests = [13]
+    # specific_tests: List[int] = field(default_factory=list)
+    specific_tests = [27, 28]
     
     # URL 配置
     image_url: str = "https://http.cat/200"
@@ -110,6 +111,8 @@ class TestRunner:
         self._add_chain_tests()
         # @功能测试
         self._add_mention_tests()
+        # 按钮测试
+        self._add_button_tests()
     
     def _add_basic_tests(self):
         """添加基础测试用例"""
@@ -165,6 +168,13 @@ class TestRunner:
         self.test_cases.extend([
             TestCase("@全体成员", self.config.enable_mention_tests, None),
             TestCase("@全体 + @用户组合", self.config.enable_mention_tests, None),
+        ])
+
+    def _add_button_tests(self):
+        """添加按钮功能测试用例"""
+        self.test_cases.extend([
+            TestCase("发送带按钮的消息（群）", self.config.enable_button_tests, None),
+            TestCase("发送带按钮的私聊消息", self.config.enable_button_tests, None),
         ])
     
     def _check_response(self, response: Any) -> tuple[bool, Optional[dict]]:
@@ -409,10 +419,31 @@ class TestRunner:
         elif test_num == 25:
             return await self.adapter.To("group", group_id).AtAll().Text("这是全体成员消息")
         
-        # 26. @全体 + @用户组合
+# 26. @全体 + @用户组合
         elif test_num == 26:
             return await self.adapter.To("group", group_id).AtAll().At(test_user_id).Text("全体 + 单个@")
-        
+
+        # 27. 发送带按钮的消息（测试yunhu按钮功能）
+        elif test_num == 27:
+            buttons = [
+                [
+                    {"text": "复制", "actionType": 2, "value": "test_copy_value"},
+                    {"text": "跳转URL", "actionType": 1, "url": "http://www.baidu.com"},
+                    {"text": "点击汇报", "actionType": 3, "value": "button_click_value"}
+                ]
+            ]
+            return await self.adapter.To("group", group_id).Buttons(buttons).Text("带按钮的消息")
+
+        # 28. 发送带按钮的私聊消息
+        elif test_num == 28:
+            buttons = [
+                [
+                    {"text": "按钮A", "actionType": 3, "value": "btn_a"},
+                    {"text": "按钮B", "actionType": 3, "value": "btn_b"}
+                ]
+            ]
+            return await self.adapter.To("user", test_user_id).Buttons(buttons).Text("点击下方按钮")
+
         return None
     
     def _print_summary(self):
@@ -515,7 +546,37 @@ async def main():
         print(f"测试适配器: {config.adapter_name}")
         print(f"测试目标: 群号 {config.group_id}")
         print("=" * 50)
-        
+        from ErisPulse.Core.Event import notice
+
+        @notice.on_notice()
+        async def handle_yunhu_notice(event):
+            print(event)
+            # 检查是否是按钮点击事件
+            if event.get("detail_type") == "yunhu_button_click":
+                user_id = event.get_user_id()
+                user_nickname = event.get_user_nickname()
+                button_value = event.get("yunhu_button", {}).get("value", "")
+
+                print(f"用户 {user_nickname}({user_id}) 点击了按钮: {button_value}")
+
+                # 使用 event.reply() 自动回复（会根据平台自动选择正确的发送方式）
+                if button_value == "confirm":
+                    await event.reply("你点击了确认按钮！")
+                elif button_value == "cancel":
+                    await event.reply("操作已取消")
+                else:
+                    await event.reply(f"收到你的选择: {button_value}")
+
+            # 处理快捷菜单事件
+            elif event.get("detail_type") == "yunhu_shortcut_menu":
+                menu_id = event.get("yunhu_menu", {}).get("id", "")
+                await event.reply(f"触发了快捷菜单: {menu_id}")
+
+            # 处理机器人设置变更
+            elif event.get("detail_type") == "yunhu_bot_setting":
+                settings = event.get("yunhu_setting", {})
+                await event.reply(f"设置已更新: {settings}")
+
         # 创建并运行测试
         runner = TestRunner(config)
         runner.setup()
