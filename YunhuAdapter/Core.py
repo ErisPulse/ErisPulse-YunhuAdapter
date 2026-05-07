@@ -21,7 +21,8 @@ class YunhuBotConfig:
 
     bot_id: str  # 机器人ID（必填）
     token: str  # 机器人token
-    webhook_path: str = "/webhook"  # Webhook路径
+    mode: str = "ws"  # 接收模式: "ws" 或 "webhook"
+    webhook_path: str = "/webhook"  # Webhook路径（仅webhook模式）
     enabled: bool = True  # 是否启用
     name: str = ""  # 账户名称
 
@@ -933,10 +934,14 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.logger = sdk.logger
         self.adapter = sdk.adapter
 
-        # 加载多bot配置
         self.bots: Dict[str, YunhuBotConfig] = self._load_bots_config()
         self.session: Optional[aiohttp.ClientSession] = None
         self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
+        self.ws_base_url = "wss://ws.jwzhd.com/subscribe"
+        self._ws_tasks: Dict[str, asyncio.Task] = {}
+        self._ws_sessions: Dict[str, aiohttp.ClientSession] = {}
+        self._ws_connections: Dict[str, aiohttp.ClientWebSocketResponse] = {}
+        self._is_running = False
 
         self.convert = self._setup_coverter()
 
@@ -969,8 +974,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                 server_config = old_config.get("server", {})
                 temp_config = {
                     "default": {
-                        "bot_id": "default",  # 默认bot_id，用户需修改
+                        "bot_id": "",
                         "token": old_config.get("token", ""),
+                        "mode": "ws",
                         "webhook_path": server_config.get("path", "/webhook"),
                         "enabled": True,
                     }
@@ -986,8 +992,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self.logger.info("未找到配置文件，创建默认bot配置")
                 default_config = {
                     "default": {
-                        "bot_id": "default",  # 用户需修改为实际的机器人ID
+                        "bot_id": "",
                         "token": "",
+                        "mode": "ws",
                         "webhook_path": "/webhook",
                         "enabled": True,
                     }
@@ -1016,6 +1023,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             merged_config = {
                 "bot_id": config["bot_id"],
                 "token": config.get("token", ""),
+                "mode": config.get("mode", "ws"),
                 "webhook_path": config.get("webhook_path", "/webhook"),
                 "enabled": config.get("enabled", True),
                 "name": bot_name,
@@ -1305,6 +1313,101 @@ class YunhuAdapter(sdk.BaseAdapter):
             self.logger.error(f"Bot {bot_name} 处理事件错误: {str(e)}")
             self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
 
+    async def _ws_connect(self, bot_name: str):
+        """连接指定bot的WebSocket，支持重连"""
+        bot = self.bots.get(bot_name)
+        if not bot:
+            return
+
+        ws_url = f"{self.ws_base_url}?token={bot.token}"
+
+        if bot_name not in self._ws_sessions:
+            self._ws_sessions[bot_name] = aiohttp.ClientSession()
+
+        retry_interval = 5
+
+        while self._is_running:
+            try:
+                self.logger.info(
+                    f"Bot {bot_name} (ID: {bot.bot_id}) 正在连接WebSocket: {_mask_token(ws_url)}"
+                )
+                ws = await self._ws_sessions[bot_name].ws_connect(
+                    ws_url, heartbeat=30
+                )
+                self._ws_connections[bot_name] = ws
+                self.logger.info(
+                    f"Bot {bot_name} (ID: {bot.bot_id}) WebSocket连接已建立"
+                )
+                await self.adapter.emit(
+                    {
+                        "type": "meta",
+                        "detail_type": "connect",
+                        "platform": "yunhu",
+                        "self": {"platform": "yunhu", "user_id": bot.bot_id},
+                    }
+                )
+                asyncio.create_task(self._ws_listen(bot_name))
+                return
+            except Exception as e:
+                self.logger.error(
+                    f"Bot {bot_name} WebSocket连接失败: {str(e)}"
+                )
+                await asyncio.sleep(retry_interval)
+
+    async def _ws_listen(self, bot_name: str):
+        """监听指定bot的WebSocket消息"""
+        ws = self._ws_connections.get(bot_name)
+        bot = self.bots.get(bot_name)
+        if not ws or not bot:
+            return
+
+        try:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    asyncio.create_task(
+                        self._ws_handle_message(msg.data, bot_name)
+                    )
+                elif msg.type == aiohttp.WSMsgType.CLOSED:
+                    self.logger.info(f"Bot {bot_name} WebSocket连接已关闭")
+                    break
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    self.logger.error(f"Bot {bot_name} WebSocket错误")
+                    break
+        except Exception as e:
+            self.logger.error(f"Bot {bot_name} WebSocket监听异常: {str(e)}")
+        finally:
+            try:
+                await self.adapter.emit(
+                    {
+                        "type": "meta",
+                        "detail_type": "disconnect",
+                        "platform": "yunhu",
+                        "self": {"platform": "yunhu", "user_id": bot.bot_id},
+                    }
+                )
+            except Exception:
+                pass
+            if bot_name in self._ws_connections:
+                del self._ws_connections[bot_name]
+
+            if self._is_running and bot.enabled and bot.mode == "ws":
+                self.logger.info(f"Bot {bot_name} 开始重连WebSocket...")
+                self._ws_tasks[bot_name] = asyncio.create_task(
+                    self._ws_connect(bot_name)
+                )
+
+    async def _ws_handle_message(self, raw_msg: str, bot_name: str):
+        """处理单条WebSocket消息"""
+        try:
+            data = json.loads(raw_msg)
+            await self._process_webhook_event(data, bot_name)
+        except json.JSONDecodeError:
+            self.logger.warning(
+                f"Bot {bot_name} 收到非JSON的WS消息: {raw_msg[:200]}"
+            )
+        except Exception as e:
+            self.logger.error(f"Bot {bot_name} 处理WS消息错误: {str(e)}")
+
     async def register_webhook(self):
         """为每个启用的bot注册webhook路由"""
         enabled_bots = {name: bot for name, bot in self.bots.items() if bot.enabled}
@@ -1341,26 +1444,82 @@ class YunhuAdapter(sdk.BaseAdapter):
         if not self.session:
             self.session = aiohttp.ClientSession()
 
-        enabled_bots = [name for name, bot in self.bots.items() if bot.enabled]
+        self._is_running = True
+        enabled_bots = {name: bot for name, bot in self.bots.items() if bot.enabled}
 
-        if enabled_bots:
-            await self.register_webhook()
-            for bot_name, bot in self.bots.items():
-                if bot.enabled:
-                    await self.adapter.emit(
-                        {
-                            "type": "meta",
-                            "detail_type": "connect",
-                            "platform": "yunhu",
-                            "self": {"platform": "yunhu", "user_id": bot.bot_id},
-                        }
-                    )
-            self.logger.info(f"云湖适配器已启动，启用的Bot: {', '.join(enabled_bots)}")
-        else:
+        if not enabled_bots:
             self.logger.warning("没有配置任何启用的机器人，适配器启动但无可用Bot")
+            return
+
+        webhook_bots = {n: b for n, b in enabled_bots.items() if b.mode != "ws"}
+        ws_bots = {n: b for n, b in enabled_bots.items() if b.mode == "ws"}
+
+        if webhook_bots:
+            for bot_name, bot in webhook_bots.items():
+                path = bot.webhook_path
+
+                def make_webhook_handler(bot_name):
+                    async def webhook_handler(data: Dict):
+                        return await self._process_webhook_event(data, bot_name)
+
+                    return webhook_handler
+
+                router.register_http_route(
+                    f"yunhu_{bot_name}",
+                    path,
+                    make_webhook_handler(bot_name),
+                    methods=["POST"],
+                )
+                self.logger.info(
+                    f"已注册Bot {bot_name} (ID: {bot.bot_id}) 的Webhook路由: {path}"
+                )
+                await self.adapter.emit(
+                    {
+                        "type": "meta",
+                        "detail_type": "connect",
+                        "platform": "yunhu",
+                        "self": {"platform": "yunhu", "user_id": bot.bot_id},
+                    }
+                )
+
+        for bot_name in ws_bots:
+            self._ws_tasks[bot_name] = asyncio.create_task(
+                self._ws_connect(bot_name)
+            )
+
+        mode_summary = []
+        if webhook_bots:
+            mode_summary.append(f"Webhook: {', '.join(webhook_bots.keys())}")
+        if ws_bots:
+            mode_summary.append(f"WebSocket: {', '.join(ws_bots.keys())}")
+        self.logger.info(
+            f"云湖适配器已启动 [{'; '.join(mode_summary)}]"
+        )
 
     async def shutdown(self):
         """关闭云湖适配器"""
+        self._is_running = False
+
+        for task in self._ws_tasks.values():
+            if not task.done():
+                task.cancel()
+        self._ws_tasks.clear()
+
+        for bot_name, ws in self._ws_connections.items():
+            try:
+                if not ws.closed:
+                    await ws.close()
+            except Exception:
+                pass
+        self._ws_connections.clear()
+
+        for session in self._ws_sessions.values():
+            try:
+                await session.close()
+            except Exception:
+                pass
+        self._ws_sessions.clear()
+
         for bot_name, bot in self.bots.items():
             if bot.enabled:
                 try:

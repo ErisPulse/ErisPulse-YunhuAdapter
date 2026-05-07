@@ -105,35 +105,49 @@ await yunhu.Send.To("group", "group456").DismissBoard("local", chat_id="group456
 
 首次运行会生成配置。云湖适配器支持多机器人配置。
 
-#### 多Bot配置（推荐）
+#### 首次运行生成的默认配置
 
 ```toml
-# config.toml
-[Yunhu_Adapter.bots.bot1]
-bot_id = "30535459"  # 机器人ID（必填）
-token = "your_bot1_token"  # 机器人token（必填）
-webhook_path = "/webhook/bot1"  # Webhook路径（可选，默认为"/webhook"）
-enabled = true  # 是否启用（可选，默认为true）
+[Yunhu_Adapter.bots.default]
+bot_id = ""           # 机器人ID（必填，请修改为实际ID）
+token = ""            # 机器人token（必填，请修改为实际token）
+mode = "ws"           # 接收模式: "ws" 或 "webhook"
+webhook_path = "/webhook"  # Webhook路径（仅webhook模式生效）
+enabled = true
+```
 
+#### 多Bot配置示例
+
+```toml
+# WebSocket 长连接模式（默认）
+[Yunhu_Adapter.bots.bot1]
+bot_id = "30535459"
+token = "your_bot1_token"
+enabled = true
+
+# Webhook 模式（需公网服务器）
 [Yunhu_Adapter.bots.bot2]
-bot_id = "12345678"  # 第二个机器人的ID
-token = "your_bot2_token"  # 第二个机器人的token
-webhook_path = "/webhook/bot2"  # 独立的webhook路径
+bot_id = "12345678"
+token = "your_bot2_token"
+mode = "webhook"
+webhook_path = "/webhook/bot2"
 enabled = true
 ```
 
 **配置项说明：**
 - `bot_id`：机器人的唯一标识ID（必填），用于标识是哪个机器人触发的事件
 - `token`：云湖平台提供的API token（必填）
-- `webhook_path`：接收云湖事件的HTTP路径（可选，默认为"/webhook"）
+- `mode`：事件接收模式（可选，默认为`"ws"`）
+  - `"ws"`：通过WebSocket长连接接收事件，无需公网IP，支持自动重连（默认）
+  - `"webhook"`：通过HTTP Webhook接收事件，需配合公网可访问的服务器
+- `webhook_path`：接收云湖事件的HTTP路径（仅webhook模式，可选，默认为"/webhook"）
 - `enabled`：是否启用该bot（可选，默认为true）
 
 **重要提示：**
 1. 云湖平台的事件中不包含机器人ID，因此必须在配置中明确指定`bot_id`
-2. 每个bot都应该有独立的`webhook_path`，以便接收各自的webhook事件
-3. 在云湖平台配置webhook时，请为每个bot配置对应的URL，例如：
-   - Bot1: `https://your-domain.com/webhook/bot1`
-   - Bot2: `https://your-domain.com/webhook/bot2`
+2. ws模式会自动连接 `wss://ws.jwzhd.com/subscribe?token=<your_token>`，支持自动重连（指数退避，最长60秒）
+3. webhook模式下，每个bot应有独立的`webhook_path`
+4. 可以混合使用webhook和ws模式，不同bot可使用不同的接收模式
 
 #### 单Bot配置（兼容旧格式）
 
