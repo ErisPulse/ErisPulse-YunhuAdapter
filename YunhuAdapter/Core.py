@@ -1500,12 +1500,16 @@ class YunhuAdapter(sdk.BaseAdapter):
         """关闭云湖适配器"""
         self._is_running = False
 
-        for task in self._ws_tasks.values():
+        tasks_to_cancel = list(self._ws_tasks.values())
+        for task in tasks_to_cancel:
             if not task.done():
                 task.cancel()
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
         self._ws_tasks.clear()
 
-        for bot_name, ws in self._ws_connections.items():
+        connections_to_close = list(self._ws_connections.items())
+        for bot_name, ws in connections_to_close:
             try:
                 if not ws.closed:
                     await ws.close()
@@ -1513,14 +1517,16 @@ class YunhuAdapter(sdk.BaseAdapter):
                 pass
         self._ws_connections.clear()
 
-        for session in self._ws_sessions.values():
+        sessions_to_close = list(self._ws_sessions.values())
+        for session in sessions_to_close:
             try:
                 await session.close()
             except Exception:
                 pass
         self._ws_sessions.clear()
 
-        for bot_name, bot in self.bots.items():
+        bot_items = list(self.bots.items())
+        for bot_name, bot in bot_items:
             if bot.enabled:
                 try:
                     await self.adapter.emit(
