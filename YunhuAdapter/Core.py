@@ -208,6 +208,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/batch_send",
+                    _account_id=self._account_id,
                     recvIds=target_ids,
                     recvType=self._target_type,
                     contentType=content_type,
@@ -232,6 +233,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/edit",
+                    _account_id=self._account_id,
                     msgId=msg_id,
                     recvId=self._target_id,
                     recvType=self._target_type,
@@ -252,6 +254,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/bot/recall",
+                    _account_id=self._account_id,
                     msgId=msg_id,
                     chatId=self._target_id,
                     chatType=self._target_type,
@@ -263,6 +266,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint=endpoint,
+                    _account_id=self._account_id,
                     chatId=self._target_id if scope == "local" else None,
                     chatType=self._target_type if scope == "local" else None,
                     contentType=kwargs.get("content_type", "text"),
@@ -279,6 +283,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint=endpoint,
+                    _account_id=self._account_id,
                     chatId=kwargs.get("chat_id") if scope == "local" else None,
                     chatType=kwargs.get("chat_type") if scope == "local" else None,
                     memberId=kwargs.get("member_id", ""),
@@ -490,6 +495,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint=endpoint,
+                    _account_id=self._account_id,
                     recvIds=self._target_id
                     if isinstance(self._target_id, list)
                     else None,
@@ -522,6 +528,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint=endpoint,
+                    _account_id=self._account_id,
                     recvIds=self._target_id
                     if isinstance(self._target_id, list)
                     else None,
@@ -687,39 +694,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         async def _upload_file_and_call_api(
             self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs
         ):
-            # 确定使用的bot
-            bot_name = self._account_id
-            bot = None
-
-            # 智能判断 _account_id 是账户名还是 bot_id
-            if bot_name and bot_name in self._adapter.bots:
-                # _account_id 是账户名，直接使用
-                bot = self._adapter.bots[bot_name]
-                if not bot.enabled:
-                    raise ValueError(f"Bot {bot_name} 已禁用")
-            elif bot_name:
-                # _account_id 是 bot_id，查找对应的账户
-                for name, bot_config in self._adapter.bots.items():
-                    if bot_config.bot_id == bot_name:
-                        bot = bot_config
-                        bot_name = name
-                        break
-                if bot and not bot.enabled:
-                    raise ValueError(f"Bot {bot_name} (bot_id: {bot.bot_id}) 已禁用")
-                if not bot:
-                    self.logger.warning(
-                        f"找不到bot_id为 {bot_name} 的机器人，将使用默认bot"
-                    )
-
-            if not bot:
-                # 使用第一个启用的bot
-                enabled_bots = [b for b in self._adapter.bots.values() if b.enabled]
-                if not enabled_bots:
-                    raise ValueError("没有配置任何启用的机器人")
-                bot = enabled_bots[0]
-                bot_name = next(
-                    (name for name, b in self._adapter.bots.items() if b == bot), ""
-                )
+            bot, bot_name = self._adapter._resolve_bot(self._account_id)
 
             # 处理URL类型文件
             if isinstance(file, str) and (
@@ -731,10 +706,10 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
 
                 if file_data is None:
-                    # 下载失败或文件过大，发送文本提示
                     error_msg = f"[文件发送失败] 无法发送文件: {file}\n原因: 文件过大(超过100MB)或下载失败"
                     return await self._adapter.call_api(
                         endpoint="/bot/send",
+                        _account_id=self._account_id,
                         recvId=self._target_id,
                         recvType=self._target_type,
                         contentType="text",
@@ -742,7 +717,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                         parentId=kwargs.get("parent_id", ""),
                     )
 
-                # 使用下载的文件名（如果未指定）
                 if file_name is None and downloaded_filename:
                     file_name = downloaded_filename
 
@@ -752,16 +726,15 @@ class YunhuAdapter(sdk.BaseAdapter):
             elif isinstance(file, str):
                 import os
 
-                # 检查是否是本地文件路径
                 if os.path.exists(file) and os.path.isfile(file):
                     self._adapter.logger.info(f"检测到本地文件路径，开始读取: {file}")
                     file_data, local_filename = self._read_local_file(file)
 
                     if file_data is None:
-                        # 读取失败，发送文本提示
                         error_msg = f"[文件发送失败] 无法发送文件: {file}\n原因: 文件不存在、过大或读取失败"
                         return await self._adapter.call_api(
                             endpoint="/bot/send",
+                            _account_id=self._account_id,
                             recvId=self._target_id,
                             recvType=self._target_type,
                             contentType="text",
@@ -769,7 +742,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                             parentId=kwargs.get("parent_id", ""),
                         )
 
-                    # 使用本地文件名（如果未指定）
                     if file_name is None and local_filename:
                         file_name = local_filename
 
@@ -777,7 +749,6 @@ class YunhuAdapter(sdk.BaseAdapter):
 
             url = f"{self._adapter.base_url}{upload_endpoint}?token={bot.token}"
 
-            # 使用不编码字段名的FormData
             data = aiohttp.FormData(quote_fields=False)
 
             if kwargs.get("stream", False):
@@ -803,7 +774,6 @@ class YunhuAdapter(sdk.BaseAdapter):
 
                     file_info = filetype.guess(sample)
 
-                    # 检测Office文档
                     if file_info and file_info.mime == "application/zip":
                         office_extension = self._detect_document(sample)
                         if office_extension:
@@ -813,7 +783,6 @@ class YunhuAdapter(sdk.BaseAdapter):
             except Exception as e:
                 self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
 
-            # 确定上传文件名
             if file_name is None:
                 if file_extension:
                     upload_filename = f"{content_type}.{file_extension}"
@@ -834,20 +803,18 @@ class YunhuAdapter(sdk.BaseAdapter):
                 filename=upload_filename,
             )
 
-            # 上传文件，增加超时时间
             timeout = aiohttp.ClientTimeout(
                 total=600, connect=30
-            )  # 10分钟总超时，30秒连接超时
+            )
             try:
                 async with self._adapter.session.post(
                     url, data=data, timeout=timeout
                 ) as response:
-                    # 检查响应状态
                     if response.status == 413:
-                        # 文件过大
                         error_msg = f"[文件发送失败] 文件过大: {upload_filename}\n原因: 超过云湖服务器限制"
                         return await self._adapter.call_api(
                             endpoint="/bot/send",
+                            _account_id=self._account_id,
                             recvId=self._target_id,
                             recvType=self._target_type,
                             contentType="text",
@@ -855,7 +822,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                             parentId=kwargs.get("parent_id", ""),
                         )
 
-                    # 尝试解析JSON
                     try:
                         upload_res = await response.json()
                     except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
@@ -864,6 +830,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                         error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 服务器返回错误 (状态码: {response.status})"
                         return await self._adapter.call_api(
                             endpoint="/bot/send",
+                            _account_id=self._account_id,
                             recvId=self._target_id,
                             recvType=self._target_type,
                             contentType="text",
@@ -887,6 +854,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 error_msg = f"[文件发送失败] 上传超时: {upload_filename}"
                 return await self._adapter.call_api(
                     endpoint="/bot/send",
+                    _account_id=self._account_id,
                     recvId=self._target_id,
                     recvType=self._target_type,
                     contentType="text",
@@ -902,6 +870,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
                 return await self._adapter.call_api(
                     endpoint="/bot/send",
+                    _account_id=self._account_id,
                     recvId=self._target_id,
                     recvType=self._target_type,
                     contentType="text",
@@ -914,7 +883,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
                 raise
 
-            # 构造API调用负载
             payload = {
                 "recvId": self._target_id,
                 "recvType": self._target_type,
@@ -926,7 +894,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             if "buttons" in kwargs:
                 payload["content"]["buttons"] = kwargs["buttons"]
 
-            return await self._adapter.call_api(endpoint, **payload)
+            return await self._adapter.call_api(endpoint, _account_id=self._account_id, **payload)
 
     def __init__(self, sdk):
         super().__init__()
@@ -1034,6 +1002,39 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.logger.info(f"云湖适配器初始化完成，共加载 {len(bots)} 个机器人")
         return bots
 
+    def _resolve_bot(self, account_id: str = None) -> tuple:
+        bot = None
+        bot_name = None
+
+        if account_id and account_id in self.bots:
+            bot = self.bots[account_id]
+            if not bot.enabled:
+                raise ValueError(f"Bot {account_id} 已禁用")
+            bot_name = account_id
+        elif account_id:
+            for name, bot_config in self.bots.items():
+                if bot_config.bot_id == account_id:
+                    bot = bot_config
+                    bot_name = name
+                    break
+            if bot and not bot.enabled:
+                raise ValueError(f"Bot {bot_name} (bot_id: {bot.bot_id}) 已禁用")
+            if not bot:
+                self.logger.warning(
+                    f"找不到bot_id为 {account_id} 的机器人，将使用默认bot"
+                )
+
+        if not bot:
+            enabled_bots = [b for b in self.bots.values() if b.enabled]
+            if not enabled_bots:
+                raise ValueError("没有配置任何启用的机器人")
+            bot = enabled_bots[0]
+            bot_name = next(
+                (name for name, b in self.bots.items() if b == bot), ""
+            )
+
+        return bot, bot_name
+
     async def _net_request(
         self,
         method: str,
@@ -1094,42 +1095,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         content_generator,
         **kwargs,
     ) -> Dict:
-        """
-        发送流式消息并返回标准 OneBot12 响应格式
-        """
-        # 确定使用的bot
-        bot_name = kwargs.get("_account_id")
-        bot = None
-
-        # 智能判断 _account_id 是账户名还是 bot_id
-        if bot_name and bot_name in self.bots:
-            # _account_id 是账户名，直接使用
-            bot = self.bots[bot_name]
-            if not bot.enabled:
-                raise ValueError(f"Bot {bot_name} 已禁用")
-            bot_token = bot.token
-        elif bot_name:
-            # _account_id 是 bot_id，查找对应的账户
-            for name, bot_config in self.bots.items():
-                if bot_config.bot_id == bot_name:
-                    bot = bot_config
-                    bot_name = name
-                    break
-            if bot and not bot.enabled:
-                raise ValueError(f"Bot {bot_name} (bot_id: {bot.bot_id}) 已禁用")
-            if not bot:
-                self.logger.warning(
-                    f"找不到bot_id为 {bot_name} 的机器人，将使用默认bot"
-                )
-
-        if not bot:
-            # 使用第一个启用的bot
-            enabled_bots = [b for b in self.bots.values() if b.enabled]
-            if not enabled_bots:
-                raise ValueError("没有配置任何启用的机器人")
-            bot = enabled_bots[0]
-            bot_token = bot.token
-            bot_name = list(self.bots.keys())[0]
+        bot, bot_name = self._resolve_bot(kwargs.get("_account_id"))
 
         endpoint = "/bot/send-stream"
         params = {
@@ -1139,7 +1105,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         }
         if "parent_id" in kwargs:
             params["parentId"] = kwargs["parent_id"]
-        url = f"{self.base_url}{endpoint}?token={bot_token}"
+        url = f"{self.base_url}{endpoint}?token={bot.token}"
         query_params = "&".join([f"{k}={v}" for k, v in params.items()])
         full_url = f"{url}&{query_params}"
         self.logger.debug(
@@ -1192,47 +1158,10 @@ class YunhuAdapter(sdk.BaseAdapter):
         return standardized
 
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
-        """
-        调用云湖API
-
-        :param endpoint: API端点
-        :param _account_id: 账户名或bot_id
-        :param params: 其他API参数
-        :return: 标准化的响应
-        """
-        # 确定使用的bot
-        bot = None
-
-        # 智能判断 _account_id 是账户名还是 bot_id
-        if _account_id and _account_id in self.bots:
-            # _account_id 是账户名，直接使用
-            bot = self.bots[_account_id]
-            if not bot.enabled:
-                raise ValueError(f"Bot {_account_id} 已禁用")
-        elif _account_id:
-            # _account_id 是 bot_id，查找对应的账户
-            for name, bot_config in self.bots.items():
-                if bot_config.bot_id == _account_id:
-                    bot = bot_config
-                    _account_id = name
-                    break
-            if bot and not bot.enabled:
-                raise ValueError(f"Bot {_account_id} (bot_id: {bot.bot_id}) 已禁用")
-            if not bot:
-                self.logger.warning(
-                    f"找不到bot_id为 {_account_id} 的机器人，将使用默认bot"
-                )
-
-        if not bot:
-            # 使用第一个启用的bot
-            enabled_bots = [b for b in self.bots.values() if b.enabled]
-            if not enabled_bots:
-                raise ValueError("没有配置任何启用的机器人")
-            bot = enabled_bots[0]
-            _account_id = next((name for name, b in self.bots.items() if b == bot), "")
+        bot, bot_name = self._resolve_bot(_account_id)
 
         self.logger.debug(
-            f"Bot {_account_id} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}"
+            f"Bot {bot_name} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}"
         )
 
         raw_response = await self._net_request(
