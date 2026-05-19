@@ -128,6 +128,18 @@ class YunhuAdapter(sdk.BaseAdapter):
                 ]
             )
 
+        def A2UI(self, text: str):
+            return self.Raw_ob12(
+                [
+                    {
+                        "type": "a2ui",
+                        "data": {
+                            "a2ui": text,
+                        },
+                    }
+                ]
+            )
+
         def Image(
             self,
             file,
@@ -464,6 +476,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                 html_text = seg_data.get("html", "")
                 return await self._do_send_text_like(
                     html_text, "html", buttons=param_buttons, parent_id=param_parent_id
+                )
+
+            elif seg_type == "a2ui":
+                a2ui_text = seg_data.get("a2ui", "")
+                return await self._do_send_text_like(
+                    a2ui_text, "a2ui", parent_id=param_parent_id
                 )
 
             elif seg_type == "reply":

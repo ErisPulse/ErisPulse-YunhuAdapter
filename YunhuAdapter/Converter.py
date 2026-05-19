@@ -31,6 +31,7 @@ class YunhuConverter:
             "group.leave": "notice.group_member_decrease",
             # 云湖特有事件（添加yunhu_前缀）
             "button.report.inline": "notice.yunhu_button_click",
+            "a2ui.button.report": "notice.yunhu_a2ui_button",
             "bot.shortcut.menu": "notice.yunhu_shortcut_menu",
             "bot.setting": "notice.yunhu_bot_setting",
         }
@@ -86,6 +87,7 @@ class YunhuConverter:
             "notice.group_member_increase": self._handle_group_member_event,
             "notice.group_member_decrease": self._handle_group_member_event,
             "notice.yunhu_button_click": self._handle_button_event,
+            "notice.yunhu_a2ui_button": self._handle_a2ui_button_event,
             "notice.yunhu_shortcut_menu": self._handle_menu_event,
             "notice.yunhu_bot_setting": self._handle_setting_event,
         }
@@ -269,6 +271,28 @@ class YunhuConverter:
                 "yunhu_button": {
                     "id": event_data.get("buttonId", ""),
                     "value": event_data.get("value", ""),
+                },
+            }
+        )
+        return base_event
+
+    def _handle_a2ui_button_event(
+        self, event_type: str, event_data: Dict, base_event: Dict
+    ) -> Dict:
+        base_event.update(
+            {
+                "type": "notice",
+                "detail_type": "yunhu_a2ui_button",
+                "user_id": event_data.get("userId", ""),
+                "user_nickname": event_data.get("nickname", ""),
+                "message_id": event_data.get("msgId", ""),
+                "yunhu_a2ui": {
+                    "recv_id": event_data.get("recvId", ""),
+                    "recv_type": event_data.get("recvType", ""),
+                    "action_name": event_data.get("actionName", ""),
+                    "source_component_id": event_data.get("sourceComponentId", ""),
+                    "form_context": event_data.get("formContext", {}),
+                    "interaction_json": event_data.get("interactionJson", ""),
                 },
             }
         )
