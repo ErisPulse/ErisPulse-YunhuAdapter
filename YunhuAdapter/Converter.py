@@ -175,7 +175,12 @@ class YunhuConverter:
             )
             alt_message.append("[按钮]")
 
-        message_segments = mention_segments + message_segments
+        parent_id = msg_data.get("parentId", "")
+        if parent_id:
+            reply_segments = [{"type": "reply", "data": {"message_id": parent_id}}]
+            message_segments = reply_segments + mention_segments + message_segments
+        else:
+            message_segments = mention_segments + message_segments
 
         chat_type = chat_info.get("chatType", "")
         base_event["detail_type"] = "private" if chat_type == "bot" else "group"
