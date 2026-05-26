@@ -597,13 +597,13 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         async def _download_file_from_url(
             self, url: str, max_size: int = 100 * 1024 * 1024
-        ) -> tuple[Optional[bytes], Optional[str]]:
+        ) -> tuple[Optional[io.BytesIO], Optional[str]]:
             """
             从 URL 下载文件
 
             :param url: 文件URL
             :param max_size: 最大文件大小（字节），默认100MB
-            :return: (文件内容, 文件名) 或 (None, None)
+            :return: (文件内容BytesIO, 文件名) 或 (None, None)
             """
             if not url:
                 return None, None
@@ -643,8 +643,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                     downloaded_size = 0
 
                     async for chunk in response.content.iter_chunked(
-                        8192
-                    ):  # 8KB chunks
+                        1048576
+                    ):  # 1MB chunks
                         downloaded_size += len(chunk)
                         if downloaded_size > max_size:
                             self._adapter.logger.warning(
@@ -654,12 +654,11 @@ class YunhuAdapter(sdk.BaseAdapter):
                         file_buffer.write(chunk)
 
                     file_buffer.seek(0)
-                    file_data = file_buffer.read()
 
                     self._adapter.logger.debug(
-                        f"文件下载完成: {len(file_data)} bytes, 文件名: {filename}"
+                        f"文件下载完成: {downloaded_size} bytes, 文件名: {filename}"
                     )
-                    return file_data, filename
+                    return file_buffer, filename
 
             except Exception as e:
                 self._adapter.logger.error(
@@ -784,7 +783,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                 temp_file.seek(0)
                 file_data = temp_file
             else:
-                file_data = io.BytesIO(file) if isinstance(file, bytes) else file
+                if isinstance(file, bytes):
+                    file_data = io.BytesIO(file)
+                elif isinstance(file, io.BytesIO):
+                    file_data = file
+                else:
+                    file_data = io.BytesIO(file)
 
             file_info = None
             file_extension = None
@@ -827,7 +831,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
             timeout = aiohttp.ClientTimeout(
-                total=600, connect=30
+                total=300, connect=15, sock_read=120
             )
             try:
                 async with self._adapter.session.post(
