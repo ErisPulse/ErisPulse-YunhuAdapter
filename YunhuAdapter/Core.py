@@ -55,15 +55,15 @@ class YunhuAdapter(sdk.BaseAdapter):
             self._reply_message_id = None  # 回复的消息ID (parent_id)
             self._buttons = None  # 按钮数据
 
-        def At(self, user_id: str, name: str = None) -> "Send":
+        def At(self, user_id: str, name: str = None):
             self._at_user_ids.append(str(user_id))
             return self
 
-        def Reply(self, message_id: str) -> "Send":
+        def Reply(self, message_id: str):
             self._reply_message_id = str(message_id)
             return self
 
-        def Buttons(self, buttons: List) -> "Send":
+        def Buttons(self, buttons: List):
             self._buttons = buttons
             return self
 
@@ -620,8 +620,13 @@ class YunhuAdapter(sdk.BaseAdapter):
                 if not self._adapter.session:
                     self._adapter.session = aiohttp.ClientSession()
 
+                headers = {}
+                if "jwznb.com" in url:
+                    headers["Referer"] = "http://myapp.jwznb.com"
+                    headers["User-Agent"] = "ErisPulse-Worker"
+
                 async with self._adapter.session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=300)
+                    url, timeout=aiohttp.ClientTimeout(total=300), headers=headers
                 ) as response:
                     # 检查Content-Length
                     content_length = response.headers.get("Content-Length")
