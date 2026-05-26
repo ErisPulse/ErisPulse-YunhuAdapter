@@ -359,9 +359,19 @@ class YunhuConverter:
         }
 
         url_key, name_key, *extra_keys = media_map[media_type]
+        raw_url = content.get(url_key, "")
+
+        url_prefixes = {
+            "video": "https://chat-video1.jwznb.com/",
+            "file": "https://chat-file.jwznb.com/",
+        }
+        prefix = url_prefixes.get(media_type, "")
+        if raw_url and prefix and not raw_url.startswith("http"):
+            raw_url = prefix + raw_url
+
         media_data = {
-            "file_id": content.get(url_key, ""),
-            "url": content.get(url_key, ""),
+            "file_id": raw_url,
+            "url": raw_url,
             "file_name": content.get(name_key, ""),
         }
 
