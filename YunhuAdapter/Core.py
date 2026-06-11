@@ -1,30 +1,65 @@
 import asyncio
-import aiohttp
 import io
 import json
 import re
+import time
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import filetype
 from ErisPulse import sdk
-from ErisPulse.Core import router
+from ErisPulse.Core import client, router, ClientWebSocket
+from ErisPulse.Core.Bases.errors import ClientError, ClientTimeoutError
+from ErisPulse.Core.Bases.websocket import WSMessage
+from ErisPulse.runtime.config_schema import BotAccountConfig
 
 
 def _mask_token(url: str) -> str:
-    """安全地掩盖URL中的token参数"""
     return re.sub(r"([?&]token=)[^&]*", r"\1***", url)
 
 
 @dataclass
-class YunhuBotConfig:
+class YunhuBotConfig(BotAccountConfig):
     """云湖机器人账户配置"""
 
-    bot_id: str  # 机器人ID（必填）
-    token: str  # 机器人token
-    mode: str = "ws"  # 接收模式: "ws" 或 "webhook"
-    webhook_path: str = "/webhook"  # Webhook路径（仅webhook模式）
-    enabled: bool = True  # 是否启用
-    name: str = ""  # 账户名称
+    bot_id: str = field(
+        default="",
+        metadata={
+            "description": "机器人ID",
+            "required": True,
+            "webui": {"widget": "text", "group": "basic", "order": 1},
+        },
+    )
+    token: str = field(
+        default="",
+        metadata={
+            "description": "机器人Token",
+            "required": True,
+            "secret": True,
+            "webui": {"widget": "password", "group": "basic", "order": 2},
+        },
+    )
+    mode: str = field(
+        default="ws",
+        metadata={
+            "description": "接收模式",
+            "webui": {
+                "widget": "select",
+                "group": "connection",
+                "order": 3,
+                "options": [
+                    {"label": "WebSocket", "value": "ws"},
+                    {"label": "Webhook", "value": "webhook"},
+                ],
+            },
+        },
+    )
+    webhook_path: str = field(
+        default="/webhook",
+        metadata={
+            "description": "Webhook路径（仅webhook模式）",
+            "webui": {"widget": "text", "group": "connection", "order": 4},
+        },
+    )
 
 
 class YunhuAdapter(sdk.BaseAdapter):
@@ -34,8 +69,11 @@ class YunhuAdapter(sdk.BaseAdapter):
     {!--< tips >!--}
     1. 使用统一适配器服务器系统管理Webhook路由
     2. 提供完整的消息发送DSL接口
+    3. 使用 AccountConfigClass 声明式管理多账户配置
     {!--< /tips >!--}
     """
+
+    AccountConfigClass = YunhuBotConfig
 
     class Send(sdk.BaseAdapter.Send):
         """
@@ -51,28 +89,18 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         def __init__(self, adapter, target_type=None, target_id=None, account_id=None):
             super().__init__(adapter, target_type, target_id, account_id)
-            self._at_user_ids = []  # @的用户列表
-            self._reply_message_id = None  # 回复的消息ID (parent_id)
-            self._buttons = None  # 按钮数据
-
-        def At(self, user_id: str, name: str = None):
-            self._at_user_ids.append(str(user_id))
-            return self
-
-        def Reply(self, message_id: str):
-            self._reply_message_id = str(message_id)
-            return self
+            self._buttons = None
 
         def Buttons(self, buttons: List):
             self._buttons = buttons
             return self
 
         def _reset_modifiers(self):
-            self._at_user_ids = []
-            self._reply_message_id = None
             self._buttons = None
 
-        def _build_content_with_modifiers(self, text: str, content_type: str, buttons: List = None) -> Dict:
+        def _build_content_with_modifiers(
+            self, text: str, content_type: str, buttons: List = None
+        ) -> Dict:
             result = {"text": text}
             if self._at_user_ids:
                 at_text = " ".join([f"@{uid}" for uid in self._at_user_ids])
@@ -338,10 +366,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 seg_type = segment.get("type", "")
 
                 if seg_type == "reply":
-                    if not current_group:
-                        current_group.append(segment)
-                    else:
-                        current_group.append(segment)
+                    current_group.append(segment)
                     continue
 
                 if seg_type in text_mergeable_types:
@@ -522,7 +547,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                     else self._target_id,
                     recvType=self._target_type,
                     contentType="text",
-                    content=self._build_content_with_modifiers(text, "text", buttons=buttons),
+                    content=self._build_content_with_modifiers(
+                        text, "text", buttons=buttons
+                    ),
                     parentId=self._get_parent_id(parent_id),
                 )
             )
@@ -555,7 +582,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                     else self._target_id,
                     recvType=self._target_type,
                     contentType=content_type,
-                    content=self._build_content_with_modifiers(text, content_type, buttons=buttons),
+                    content=self._build_content_with_modifiers(
+                        text, content_type, buttons=buttons
+                    ),
                     parentId=self._get_parent_id(parent_id),
                 )
             )
@@ -585,9 +614,9 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         def _detect_document(self, sample_bytes):
             office_signatures = {
-                b"PK\x03\x04\x14\x00\x06\x00": "docx",  # DOCX
-                b"PK\x03\x04\x14\x00\x00\x08": "xlsx",  # XLSX
-                b"PK\x03\x04\x14\x00\x00\x06": "pptx",  # PPTX
+                b"PK\x03\x04\x14\x00\x06\x00": "docx",
+                b"PK\x03\x04\x14\x00\x00\x08": "xlsx",
+                b"PK\x03\x04\x14\x00\x00\x06": "pptx",
             }
 
             for signature, extension in office_signatures.items():
@@ -598,18 +627,10 @@ class YunhuAdapter(sdk.BaseAdapter):
         async def _download_file_from_url(
             self, url: str, max_size: int = 100 * 1024 * 1024
         ) -> tuple[Optional[io.BytesIO], Optional[str]]:
-            """
-            从 URL 下载文件
-
-            :param url: 文件URL
-            :param max_size: 最大文件大小（字节），默认100MB
-            :return: (文件内容BytesIO, 文件名) 或 (None, None)
-            """
             if not url:
                 return None, None
 
             try:
-                # 从URL中提取文件名
                 from urllib.parse import urlparse, unquote
 
                 parsed_url = urlparse(url)
@@ -617,48 +638,39 @@ class YunhuAdapter(sdk.BaseAdapter):
 
                 self._adapter.logger.debug(f"开始下载文件: {url}")
 
-                if not self._adapter.session:
-                    self._adapter.session = aiohttp.ClientSession()
-
                 headers = {}
                 if "jwznb.com" in url:
                     headers["Referer"] = "http://myapp.jwznb.com"
                     headers["User-Agent"] = "ErisPulse-Worker"
 
-                async with self._adapter.session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=300), headers=headers
-                ) as response:
-                    # 检查Content-Length
-                    content_length = response.headers.get("Content-Length")
-                    if content_length:
-                        size = int(content_length)
-                        if size > max_size:
-                            self._adapter.logger.warning(
-                                f"文件过大: {size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)"
-                            )
-                            return None, None
+                resp = await client.get(url, headers=headers, timeout=300)
+                content_length = resp.headers.get("Content-Length")
+                if content_length:
+                    size = int(content_length)
+                    if size > max_size:
+                        self._adapter.logger.warning(
+                            f"文件过大: {size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)"
+                        )
+                        return None, None
 
-                    # 使用io.BytesIO流式下载，避免一次性加载大文件到内存
-                    file_buffer = io.BytesIO()
-                    downloaded_size = 0
+                file_buffer = io.BytesIO()
+                downloaded_size = 0
 
-                    async for chunk in response.content.iter_chunked(
-                        1048576
-                    ):  # 1MB chunks
-                        downloaded_size += len(chunk)
-                        if downloaded_size > max_size:
-                            self._adapter.logger.warning(
-                                f"下载文件过大: {downloaded_size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)"
-                            )
-                            return None, None
-                        file_buffer.write(chunk)
+                async for chunk in resp.raw.content.iter_chunked(1048576):
+                    downloaded_size += len(chunk)
+                    if downloaded_size > max_size:
+                        self._adapter.logger.warning(
+                            f"下载文件过大: {downloaded_size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)"
+                        )
+                        return None, None
+                    file_buffer.write(chunk)
 
-                    file_buffer.seek(0)
+                file_buffer.seek(0)
 
-                    self._adapter.logger.debug(
-                        f"文件下载完成: {downloaded_size} bytes, 文件名: {filename}"
-                    )
-                    return file_buffer, filename
+                self._adapter.logger.debug(
+                    f"文件下载完成: {downloaded_size} bytes, 文件名: {filename}"
+                )
+                return file_buffer, filename
 
             except Exception as e:
                 self._adapter.logger.error(
@@ -669,30 +681,19 @@ class YunhuAdapter(sdk.BaseAdapter):
         def _read_local_file(
             self, file_path: str, max_size: int = 100 * 1024 * 1024
         ) -> tuple[Optional[bytes], Optional[str]]:
-            """
-            读取本地文件
-
-            :param file_path: 文件路径
-            :param max_size: 最大文件大小（字节），默认100MB
-            :return: (文件内容, 文件名) 或 (None, None)
-            """
             import os
 
             try:
-                # 检查文件是否存在
                 if not os.path.exists(file_path):
                     self._adapter.logger.error(f"文件不存在: {file_path}")
                     return None, None
 
-                # 检查是否为文件
                 if not os.path.isfile(file_path):
                     self._adapter.logger.error(f"路径不是文件: {file_path}")
                     return None, None
 
-                # 获取文件名
                 filename = os.path.basename(file_path)
 
-                # 检查文件大小
                 file_size = os.path.getsize(file_path)
                 if file_size > max_size:
                     self._adapter.logger.warning(
@@ -700,7 +701,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                     )
                     return None, None
 
-                # 读取文件
                 with open(file_path, "rb") as f:
                     file_data = f.read()
 
@@ -716,9 +716,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         async def _upload_file_and_call_api(
             self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs
         ):
-            bot, bot_name = self._adapter._resolve_bot(self._account_id)
+            bot_name, bot = self._adapter._resolve_account(self._account_id)
 
-            # 处理URL类型文件
             if isinstance(file, str) and (
                 file.startswith("http://") or file.startswith("https://")
             ):
@@ -744,7 +743,6 @@ class YunhuAdapter(sdk.BaseAdapter):
 
                 file = file_data
 
-            # 处理本地文件路径
             elif isinstance(file, str):
                 import os
 
@@ -770,6 +768,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                     file = file_data
 
             url = f"{self._adapter.base_url}{upload_endpoint}?token={bot.token}"
+
+            import aiohttp
 
             data = aiohttp.FormData(quote_fields=False)
 
@@ -830,40 +830,36 @@ class YunhuAdapter(sdk.BaseAdapter):
                 filename=upload_filename,
             )
 
-            timeout = aiohttp.ClientTimeout(
-                total=300, connect=15, sock_read=120
-            )
             try:
-                async with self._adapter.session.post(
-                    url, data=data, timeout=timeout
-                ) as response:
-                    if response.status == 413:
-                        error_msg = f"[文件发送失败] 文件过大: {upload_filename}\n原因: 超过云湖服务器限制"
-                        return await self._adapter.call_api(
-                            endpoint="/bot/send",
-                            _account_id=self._account_id,
-                            recvId=self._target_id,
-                            recvType=self._target_type,
-                            contentType="text",
-                            content={"text": error_msg},
-                            parentId=kwargs.get("parent_id", ""),
-                        )
+                resp = await client.post(url, data=data, timeout=300)
 
-                    try:
-                        upload_res = await response.json()
-                    except (aiohttp.ContentTypeError, json.JSONDecodeError) as e:
-                        error_text = (await response.text())[:500]
-                        self._adapter.logger.error(f"上传响应非JSON格式: {error_text}")
-                        error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 服务器返回错误 (状态码: {response.status})"
-                        return await self._adapter.call_api(
-                            endpoint="/bot/send",
-                            _account_id=self._account_id,
-                            recvId=self._target_id,
-                            recvType=self._target_type,
-                            contentType="text",
-                            content={"text": error_msg},
-                            parentId=kwargs.get("parent_id", ""),
-                        )
+                if resp.status == 413:
+                    error_msg = f"[文件发送失败] 文件过大: {upload_filename}\n原因: 超过云湖服务器限制"
+                    return await self._adapter.call_api(
+                        endpoint="/bot/send",
+                        _account_id=self._account_id,
+                        recvId=self._target_id,
+                        recvType=self._target_type,
+                        contentType="text",
+                        content={"text": error_msg},
+                        parentId=kwargs.get("parent_id", ""),
+                    )
+
+                try:
+                    upload_res = await resp.json()
+                except (json.JSONDecodeError, ValueError) as e:
+                    error_text = (await resp.text())[:500]
+                    self._adapter.logger.error(f"上传响应非JSON格式: {error_text}")
+                    error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 服务器返回错误 (状态码: {resp.status})"
+                    return await self._adapter.call_api(
+                        endpoint="/bot/send",
+                        _account_id=self._account_id,
+                        recvId=self._target_id,
+                        recvType=self._target_type,
+                        contentType="text",
+                        content={"text": error_msg},
+                        parentId=kwargs.get("parent_id", ""),
+                    )
 
                 self._adapter.logger.debug(f"上传响应: {upload_res}")
 
@@ -876,7 +872,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 if "data" not in upload_res or key_name not in upload_res["data"]:
                     raise ValueError("上传API返回的数据格式不正确")
 
-            except aiohttp.ServerTimeoutError:
+            except ClientTimeoutError:
                 self._adapter.logger.error(f"文件上传超时: {_mask_token(url)}")
                 error_msg = f"[文件发送失败] 上传超时: {upload_filename}"
                 return await self._adapter.call_api(
@@ -888,7 +884,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     content={"text": error_msg},
                     parentId=kwargs.get("parent_id", ""),
                 )
-            except aiohttp.ClientError as e:
+            except ClientError as e:
                 self._adapter.logger.error(
                     f"文件上传失败: {_mask_token(url)}, 错误: {str(e)}"
                 )
@@ -905,6 +901,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                     parentId=kwargs.get("parent_id", ""),
                 )
             except Exception as e:
+                if isinstance(e, (ValueError,)):
+                    raise
                 self._adapter.logger.error(
                     f"文件上传异常: {_mask_token(url)}, 错误: {str(e)}"
                 )
@@ -921,53 +919,30 @@ class YunhuAdapter(sdk.BaseAdapter):
             if "buttons" in kwargs:
                 payload["content"]["buttons"] = kwargs["buttons"]
 
-            return await self._adapter.call_api(endpoint, _account_id=self._account_id, **payload)
+            return await self._adapter.call_api(
+                endpoint, _account_id=self._account_id, **payload
+            )
 
-    def __init__(self, sdk):
-        super().__init__()
-        self.sdk = sdk
-        self.logger = sdk.logger
-        self.adapter = sdk.adapter
+    def _get_config_key(self) -> str:
+        return "Yunhu_Adapter"
 
-        self.bots: Dict[str, YunhuBotConfig] = self._load_bots_config()
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
-        self.ws_base_url = "wss://ws.jwzhd.com/subscribe"
-        self._ws_tasks: Dict[str, asyncio.Task] = {}
-        self._ws_sessions: Dict[str, aiohttp.ClientSession] = {}
-        self._ws_connections: Dict[str, aiohttp.ClientWebSocketResponse] = {}
-        self._is_running = False
+    def _load_accounts(self) -> dict:
+        from ErisPulse.runtime.config_schema import dict_to_dataclass
+        from ErisPulse.Core.config import config as config_mgr
 
-        self.convert = self._setup_coverter()
+        key = "Yunhu_Adapter.bots"
+        data = config_mgr.getConfig(key)
 
-    def _setup_coverter(self):
-        from .Converter import YunhuConverter
-
-        convert = YunhuConverter()
-        return convert.convert
-
-    def _load_bots_config(self) -> Dict[str, YunhuBotConfig]:
-        """加载多bot配置"""
-        bots = {}
-
-        # 检查新格式的bot配置
-        bot_configs = self.sdk.config.getConfig("Yunhu_Adapter.bots", {})
-
-        if not bot_configs:
-            # 检查旧配置格式，进行兼容性处理
-            old_config = self.sdk.config.getConfig("Yunhu_Adapter")
+        if not data:
+            old_config = config_mgr.getConfig("Yunhu_Adapter")
             if old_config and "token" in old_config:
-                self.logger.warning("检测到旧格式配置，正在迁移到新格式...")
-                self.logger.warning(
-                    "旧配置已兼容，但建议迁移到新配置格式以获得更好的多bot支持。"
-                )
+                self.logger.warning("检测到旧格式配置，建议迁移到新格式")
                 self.logger.warning(
                     "迁移方法：将现有配置移动到 Yunhu_Adapter.bots.default 下"
                 )
 
-                # 临时使用旧配置，创建默认bot
                 server_config = old_config.get("server", {})
-                temp_config = {
+                data = {
                     "default": {
                         "bot_id": "",
                         "token": old_config.get("token", ""),
@@ -976,16 +951,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                         "enabled": True,
                     }
                 }
-                bot_configs = temp_config
-
                 self.logger.warning(
                     "已临时加载旧配置为默认bot，请尽快迁移到新格式并设置正确的bot_id"
                 )
-
             else:
-                # 创建默认bot配置
                 self.logger.info("未找到配置文件，创建默认bot配置")
-                default_config = {
+                data = {
                     "default": {
                         "bot_id": "",
                         "token": "",
@@ -994,73 +965,46 @@ class YunhuAdapter(sdk.BaseAdapter):
                         "enabled": True,
                     }
                 }
-
                 try:
-                    self.sdk.config.setConfig("Yunhu_Adapter.bots", default_config)
-                    bot_configs = default_config
+                    config_mgr.setConfig(key, data)
                 except Exception as e:
                     self.logger.error(f"保存默认bot配置失败: {str(e)}")
-                    # 即使保存失败也使用内存中的配置
-                    bot_configs = default_config
 
-        # 创建bot配置对象
-        for bot_name, config in bot_configs.items():
-            # 检查必填字段
-            if "bot_id" not in config or not config["bot_id"]:
-                self.logger.error(f"Bot {bot_name} 缺少bot_id配置，已跳过")
+        accounts = {}
+        for name, account_data in data.items():
+            if not isinstance(account_data, dict):
+                continue
+            if "bot_id" not in account_data or not account_data["bot_id"]:
+                self.logger.error(f"Bot {name} 缺少bot_id配置，已跳过")
+                continue
+            if "token" not in account_data:
+                self.logger.error(f"Bot {name} 缺少token配置，已跳过")
                 continue
 
-            if "token" not in config:
-                self.logger.error(f"Bot {bot_name} 缺少token配置，已跳过")
-                continue
+            instance = dict_to_dataclass(YunhuBotConfig, account_data)
+            instance.name = name
+            accounts[name] = instance
 
-            # 使用内置默认值
-            merged_config = {
-                "bot_id": config["bot_id"],
-                "token": config.get("token", ""),
-                "mode": config.get("mode", "ws"),
-                "webhook_path": config.get("webhook_path", "/webhook"),
-                "enabled": config.get("enabled", True),
-                "name": bot_name,
-            }
+        self.logger.info(f"云湖适配器初始化完成，共加载 {len(accounts)} 个机器人")
+        return accounts
 
-            bots[bot_name] = YunhuBotConfig(**merged_config)
+    def __init__(self, sdk_instance=None):
+        super().__init__(sdk_instance)
 
-        self.logger.info(f"云湖适配器初始化完成，共加载 {len(bots)} 个机器人")
-        return bots
+        self.adapter = sdk.adapter
+        self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
+        self.ws_base_url = "wss://ws.jwzhd.com/subscribe"
+        self._ws_tasks: Dict[str, asyncio.Task] = {}
+        self._ws_connections: Dict[str, ClientWebSocket] = {}
+        self._is_running = False
 
-    def _resolve_bot(self, account_id: str = None) -> tuple:
-        bot = None
-        bot_name = None
+        self.convert = self._setup_converter()
 
-        if account_id and account_id in self.bots:
-            bot = self.bots[account_id]
-            if not bot.enabled:
-                raise ValueError(f"Bot {account_id} 已禁用")
-            bot_name = account_id
-        elif account_id:
-            for name, bot_config in self.bots.items():
-                if bot_config.bot_id == account_id:
-                    bot = bot_config
-                    bot_name = name
-                    break
-            if bot and not bot.enabled:
-                raise ValueError(f"Bot {bot_name} (bot_id: {bot.bot_id}) 已禁用")
-            if not bot:
-                self.logger.warning(
-                    f"找不到bot_id为 {account_id} 的机器人，将使用默认bot"
-                )
+    def _setup_converter(self):
+        from .Converter import YunhuConverter
 
-        if not bot:
-            enabled_bots = [b for b in self.bots.values() if b.enabled]
-            if not enabled_bots:
-                raise ValueError("没有配置任何启用的机器人")
-            bot = enabled_bots[0]
-            bot_name = next(
-                (name for name, b in self.bots.items() if b == bot), ""
-            )
-
-        return bot, bot_name
+        convert = YunhuConverter()
+        return convert.convert
 
     async def _net_request(
         self,
@@ -1070,12 +1014,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         params: Dict = None,
         bot_token: str = None,
     ) -> Dict:
-        """网络请求基础方法"""
-        # 确定使用的token
         token = bot_token if bot_token else ""
         url = f"{self.base_url}{endpoint}?token={token}"
-        if not self.session:
-            self.session = aiohttp.ClientSession()
 
         json_data = json.dumps(data) if data else None
         headers = {"Content-Type": "application/json; charset=utf-8"}
@@ -1085,29 +1025,26 @@ class YunhuAdapter(sdk.BaseAdapter):
         )
 
         try:
-            async with self.session.request(
+            resp = await client.request(
                 method, url, data=json_data, params=params, headers=headers
-            ) as response:
-                content_type = response.headers.get("Content-Type", "")
-                if "application/json" in content_type:
-                    result = await response.json()
-                    self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
-                    return result
-                else:
-                    text = await response.text()
-                    self.logger.warning(
-                        f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}"
-                    )
-                    return {
-                        "error": "Invalid content type",
-                        "content_type": content_type,
-                        "status": response.status,
-                        "raw": text,
-                    }
-        except aiohttp.ServerTimeoutError as e:
+            )
+            if "application/json" in (resp.content_type or ""):
+                result = await resp.json()
+                self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
+                return result
+            else:
+                text = await resp.text()
+                self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}")
+                return {
+                    "error": "Invalid content type",
+                    "content_type": resp.content_type,
+                    "status": resp.status,
+                    "raw": text,
+                }
+        except ClientTimeoutError:
             self.logger.error(f"请求超时: {_mask_token(url)}")
             raise
-        except aiohttp.ClientError as e:
+        except ClientError as e:
             self.logger.error(f"网络请求失败: {_mask_token(url)}, 错误: {str(e)}")
             raise
         except Exception as e:
@@ -1122,7 +1059,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         content_generator,
         **kwargs,
     ) -> Dict:
-        bot, bot_name = self._resolve_bot(kwargs.get("_account_id"))
+        bot_name, bot = self._resolve_account(kwargs.get("_account_id"))
 
         endpoint = "/bot/send-stream"
         params = {
@@ -1138,54 +1075,49 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.logger.debug(
             f"Bot {bot_name} (bot_id: {bot.bot_id}) 准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}"
         )
-        if not self.session:
-            self.session = aiohttp.ClientSession()
         headers = {"Content-Type": "text/plain"}
         try:
-            async with self.session.post(
-                full_url, headers=headers, data=content_generator
-            ) as response:
-                raw_response = await response.json()
-        except aiohttp.ServerTimeoutError:
+            resp = await client.post(
+                full_url, headers=headers, data=content_generator, timeout=300
+            )
+            raw_response = await resp.json()
+        except ClientTimeoutError:
             self.logger.error(f"流式消息发送超时: {_mask_token(url)}")
             raise
-        except aiohttp.ClientError as e:
+        except ClientError as e:
             self.logger.error(f"流式消息发送失败: {_mask_token(url)}, 错误: {str(e)}")
             raise
         except Exception as e:
             self.logger.error(f"流式消息发送异常: {_mask_token(url)}, 错误: {str(e)}")
             raise
 
-        # 标准化为 OneBot12 响应格式
-        standardized = {
-            "status": "ok" if raw_response.get("code") == 1 else "failed",
-            "retcode": 0
-            if raw_response.get("code") == 1
-            else 34000 + (raw_response.get("code") or 0),
-            "data": raw_response.get("data"),
-            "message": raw_response.get("msg", ""),
-            "yunhu_raw": raw_response,
-            "self": {"user_id": bot.bot_id},  # 使用bot_id标识机器人账号
-        }
-
-        # 如果成功，提取消息ID
-        if raw_response.get("code") == 1:
+        is_ok = raw_response.get("code") == 1
+        message_id = ""
+        if is_ok:
             data = raw_response.get("data", {})
-            standardized["message_id"] = (
+            message_id = (
                 data.get("messageInfo", {}).get("msgId", "")
                 if "messageInfo" in data
                 else data.get("msgId", "")
             )
-        else:
-            standardized["message_id"] = ""
+
+        resp = self.make_response(
+            status="ok" if is_ok else "failed",
+            retcode=0 if is_ok else 34000 + (raw_response.get("code") or 0),
+            data=raw_response.get("data") if is_ok else None,
+            message_id=message_id,
+            message=raw_response.get("msg", ""),
+            raw=raw_response,
+        )
+        resp["self"] = {"user_id": bot.bot_id}
 
         if "echo" in kwargs:
-            standardized["echo"] = kwargs["echo"]
+            resp["echo"] = kwargs["echo"]
 
-        return standardized
+        return resp
 
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
-        bot, bot_name = self._resolve_bot(_account_id)
+        bot_name, bot = self._resolve_account(_account_id)
 
         self.logger.debug(
             f"Bot {bot_name} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}"
@@ -1196,19 +1128,9 @@ class YunhuAdapter(sdk.BaseAdapter):
         )
 
         is_batch = "batch" in endpoint or isinstance(params.get("recvIds"), list)
+        is_ok = raw_response.get("code") == 1
 
-        standardized = {
-            "status": "ok" if raw_response.get("code") == 1 else "failed",
-            "retcode": 0
-            if raw_response.get("code") == 1
-            else 34000 + (raw_response.get("code") or 0),
-            "data": {},
-            "message": "",
-            "yunhu_raw": raw_response,
-            "self": {"user_id": bot.bot_id},  # 使用bot_id标识机器人账号
-        }
-
-        if raw_response.get("code") == 1:
+        if is_ok:
             if is_batch:
                 message_ids = (
                     [
@@ -1219,8 +1141,11 @@ class YunhuAdapter(sdk.BaseAdapter):
                     if "successList" in raw_response.get("data", {})
                     else []
                 )
-                standardized["message_id"] = message_ids
-                standardized["data"]["message_ids"] = message_ids
+                resp = self.make_response(
+                    data={"message_ids": message_ids},
+                    message_id=message_ids,
+                    raw=raw_response,
+                )
             else:
                 data = raw_response.get("data", {})
                 message_id = (
@@ -1228,23 +1153,28 @@ class YunhuAdapter(sdk.BaseAdapter):
                     if "messageInfo" in data
                     else data.get("msgId", "")
                 )
-                standardized["message_id"] = message_id
-                standardized["data"]["message_id"] = message_id
-                # 添加时间戳
-                import time
-
-                standardized["data"]["time"] = time.time()
+                resp = self.make_response(
+                    data={"message_id": message_id, "time": time.time()},
+                    message_id=message_id,
+                    raw=raw_response,
+                )
         else:
-            standardized["data"] = None
-            standardized["message_id"] = [] if is_batch else ""
+            resp = self.make_error(
+                retcode=34000 + (raw_response.get("code") or 0),
+                message=raw_response.get("msg", ""),
+                raw=raw_response,
+            )
+            if is_batch:
+                resp["message_id"] = []
+
+        resp["self"] = {"user_id": bot.bot_id}
 
         if "echo" in params:
-            standardized["echo"] = params["echo"]
+            resp["echo"] = params["echo"]
 
-        return standardized
+        return resp
 
     async def _process_webhook_event(self, data: Dict, bot_name: str = None):
-        """处理webhook事件"""
         try:
             if not isinstance(data, dict):
                 raise ValueError("事件数据必须是字典类型")
@@ -1253,10 +1183,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                 raise ValueError("无效的事件数据结构")
 
             if hasattr(self.adapter, "emit"):
-                # 获取对应的bot配置
                 bot = None
-                if bot_name and bot_name in self.bots:
-                    bot = self.bots[bot_name]
+                if bot_name:
+                    bot = self.accounts.get(bot_name)
 
                 onebot_event = self.convert(data, bot.bot_id if bot else None)
                 self.logger.debug(
@@ -1270,15 +1199,11 @@ class YunhuAdapter(sdk.BaseAdapter):
             self.logger.debug(f"原始事件数据: {json.dumps(data, ensure_ascii=False)}")
 
     async def _ws_connect(self, bot_name: str):
-        """连接指定bot的WebSocket，支持重连"""
-        bot = self.bots.get(bot_name)
+        bot = self.accounts.get(bot_name)
         if not bot:
             return
 
         ws_url = f"{self.ws_base_url}?token={bot.token}"
-
-        if bot_name not in self._ws_sessions:
-            self._ws_sessions[bot_name] = aiohttp.ClientSession()
 
         retry_interval = 5
 
@@ -1287,63 +1212,51 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self.logger.info(
                     f"Bot {bot_name} (ID: {bot.bot_id}) 正在连接WebSocket: {_mask_token(ws_url)}"
                 )
-                ws = await self._ws_sessions[bot_name].ws_connect(
-                    ws_url, heartbeat=30
-                )
+                ws = await client.ws_connect(ws_url, heartbeat=30)
                 self._ws_connections[bot_name] = ws
                 self.logger.info(
                     f"Bot {bot_name} (ID: {bot.bot_id}) WebSocket连接已建立"
                 )
-                await self.adapter.emit(
-                    {
-                        "type": "meta",
-                        "detail_type": "connect",
-                        "platform": "yunhu",
-                        "self": {"platform": "yunhu", "user_id": bot.bot_id},
-                    }
+                await self.emit_meta("connect", bot.bot_id)
+                self._ws_tasks[bot_name] = asyncio.create_task(
+                    self._ws_listen(bot_name)
                 )
-                asyncio.create_task(self._ws_listen(bot_name))
                 return
             except Exception as e:
-                self.logger.error(
-                    f"Bot {bot_name} WebSocket连接失败: {str(e)}"
-                )
+                self.logger.error(f"Bot {bot_name} WebSocket连接失败: {str(e)}")
                 await asyncio.sleep(retry_interval)
 
     async def _ws_listen(self, bot_name: str):
-        """监听指定bot的WebSocket消息"""
         ws = self._ws_connections.get(bot_name)
-        bot = self.bots.get(bot_name)
+        bot = self.accounts.get(bot_name)
         if not ws or not bot:
             return
 
         try:
-            async for msg in ws:
-                if msg.type == aiohttp.WSMsgType.TEXT:
-                    asyncio.create_task(
-                        self._ws_handle_message(msg.data, bot_name)
-                    )
-                elif msg.type == aiohttp.WSMsgType.CLOSED:
+            while True:
+                msg = await ws.receive()
+                if msg.type == WSMessage.TEXT:
+                    asyncio.create_task(self._ws_handle_message(msg.data, bot_name))
+                elif msg.type == WSMessage.CLOSE:
                     self.logger.info(f"Bot {bot_name} WebSocket连接已关闭")
                     break
-                elif msg.type == aiohttp.WSMsgType.ERROR:
+                elif msg.type == WSMessage.ERROR:
                     self.logger.error(f"Bot {bot_name} WebSocket错误")
                     break
         except Exception as e:
             self.logger.error(f"Bot {bot_name} WebSocket监听异常: {str(e)}")
         finally:
             try:
-                await self.adapter.emit(
-                    {
-                        "type": "meta",
-                        "detail_type": "disconnect",
-                        "platform": "yunhu",
-                        "self": {"platform": "yunhu", "user_id": bot.bot_id},
-                    }
-                )
+                await self.emit_meta("disconnect", bot.bot_id)
             except Exception:
                 pass
             if bot_name in self._ws_connections:
+                ws = self._ws_connections[bot_name]
+                try:
+                    if not ws.closed:
+                        await ws.close()
+                except Exception:
+                    pass
                 del self._ws_connections[bot_name]
 
             if self._is_running and bot.enabled and bot.mode == "ws":
@@ -1353,39 +1266,32 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
 
     async def _ws_handle_message(self, raw_msg: str, bot_name: str):
-        """处理单条WebSocket消息"""
         try:
             data = json.loads(raw_msg)
             await self._process_webhook_event(data, bot_name)
         except json.JSONDecodeError:
-            self.logger.warning(
-                f"Bot {bot_name} 收到非JSON的WS消息: {raw_msg[:200]}"
-            )
+            self.logger.warning(f"Bot {bot_name} 收到非JSON的WS消息: {raw_msg[:200]}")
         except Exception as e:
             self.logger.error(f"Bot {bot_name} 处理WS消息错误: {str(e)}")
 
     async def register_webhook(self):
-        """为每个启用的bot注册webhook路由"""
-        enabled_bots = {name: bot for name, bot in self.bots.items() if bot.enabled}
+        enabled_bots = self.enabled_accounts
 
         if not enabled_bots:
             self.logger.warning("没有配置任何启用的机器人，将不会注册webhook")
             return
 
-        # 为每个bot注册独立的webhook路由
         for bot_name, bot in enabled_bots.items():
             path = bot.webhook_path
 
-            # 创建特定bot的处理器
             def make_webhook_handler(bot_name):
                 async def webhook_handler(data: Dict):
                     return await self._process_webhook_event(data, bot_name)
 
                 return webhook_handler
 
-            # 注册路由（使用bot_name作为模块名以避免冲突）
             router.register_http_route(
-                f"yunhu_{bot_name}",  # 使用bot特定的路由名称
+                f"yunhu_{bot_name}",
                 path,
                 make_webhook_handler(bot_name),
                 methods=["POST"],
@@ -1396,12 +1302,8 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
     async def start(self):
-        """启动云湖适配器"""
-        if not self.session:
-            self.session = aiohttp.ClientSession()
-
         self._is_running = True
-        enabled_bots = {name: bot for name, bot in self.bots.items() if bot.enabled}
+        enabled_bots = self.enabled_accounts
 
         if not enabled_bots:
             self.logger.warning("没有配置任何启用的机器人，适配器启动但无可用Bot")
@@ -1429,31 +1331,19 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self.logger.info(
                     f"已注册Bot {bot_name} (ID: {bot.bot_id}) 的Webhook路由: {path}"
                 )
-                await self.adapter.emit(
-                    {
-                        "type": "meta",
-                        "detail_type": "connect",
-                        "platform": "yunhu",
-                        "self": {"platform": "yunhu", "user_id": bot.bot_id},
-                    }
-                )
+                await self.emit_meta("connect", bot.bot_id)
 
         for bot_name in ws_bots:
-            self._ws_tasks[bot_name] = asyncio.create_task(
-                self._ws_connect(bot_name)
-            )
+            self._ws_tasks[bot_name] = asyncio.create_task(self._ws_connect(bot_name))
 
         mode_summary = []
         if webhook_bots:
             mode_summary.append(f"Webhook: {', '.join(webhook_bots.keys())}")
         if ws_bots:
             mode_summary.append(f"WebSocket: {', '.join(ws_bots.keys())}")
-        self.logger.info(
-            f"云湖适配器已启动 [{'; '.join(mode_summary)}]"
-        )
+        self.logger.info(f"云湖适配器已启动 [{'; '.join(mode_summary)}]")
 
     async def shutdown(self):
-        """关闭云湖适配器"""
         self._is_running = False
 
         tasks_to_cancel = list(self._ws_tasks.values())
@@ -1473,29 +1363,14 @@ class YunhuAdapter(sdk.BaseAdapter):
                 pass
         self._ws_connections.clear()
 
-        sessions_to_close = list(self._ws_sessions.values())
-        for session in sessions_to_close:
+        try:
+            await client.close()
+        except Exception:
+            pass
+
+        for bot_name, bot in self.enabled_accounts.items():
             try:
-                await session.close()
+                await self.emit_meta("disconnect", bot.bot_id)
             except Exception:
                 pass
-        self._ws_sessions.clear()
-
-        bot_items = list(self.bots.items())
-        for bot_name, bot in bot_items:
-            if bot.enabled:
-                try:
-                    await self.adapter.emit(
-                        {
-                            "type": "meta",
-                            "detail_type": "disconnect",
-                            "platform": "yunhu",
-                            "self": {"platform": "yunhu", "user_id": bot.bot_id},
-                        }
-                    )
-                except Exception:
-                    pass
-        if self.session:
-            await self.session.close()
-            self.session = None
         self.logger.info("云湖适配器已关闭")
