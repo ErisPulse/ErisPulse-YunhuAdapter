@@ -330,6 +330,145 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
+        def Kick(self, user_id: str):
+            if self._target_type != "group":
+                raise ValueError("Kick必须使用To('group', group_id)指定群组")
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/remove-member",
+                    _account_id=self._account_id,
+                    userId=user_id,
+                    groupId=self._target_id,
+                )
+            )
+
+        def Ban(self, user_id: str, duration: int = 600):
+            if self._target_type != "group":
+                raise ValueError("Ban必须使用To('group', group_id)指定群组")
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/gag-member",
+                    _account_id=self._account_id,
+                    userId=user_id,
+                    groupId=self._target_id,
+                    gag=duration,
+                )
+            )
+
+        def CreateTag(
+            self,
+            tag: str,
+            color: str = None,
+            desc: str = None,
+            sort: int = None,
+        ):
+            if self._target_type != "group":
+                raise ValueError("CreateTag必须使用To('group', group_id)指定群组")
+            params = {"groupId": self._target_id, "tag": tag}
+            if color is not None:
+                params["color"] = color
+            if desc is not None:
+                params["desc"] = desc
+            if sort is not None:
+                params["sort"] = sort
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/tag/create",
+                    _account_id=self._account_id,
+                    **params,
+                )
+            )
+
+        def EditTag(
+            self,
+            tag: str,
+            new_tag: str = None,
+            color: str = None,
+            desc: str = None,
+            sort: int = None,
+        ):
+            if self._target_type != "group":
+                raise ValueError("EditTag必须使用To('group', group_id)指定群组")
+            params = {"groupId": self._target_id, "tag": tag}
+            if new_tag is not None:
+                params["newTag"] = new_tag
+            if color is not None:
+                params["color"] = color
+            if desc is not None:
+                params["desc"] = desc
+            if sort is not None:
+                params["sort"] = sort
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/tag/edit",
+                    _account_id=self._account_id,
+                    **params,
+                )
+            )
+
+        def DeleteTag(self, tag: str):
+            if self._target_type != "group":
+                raise ValueError("DeleteTag必须使用To('group', group_id)指定群组")
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/tag/delete",
+                    _account_id=self._account_id,
+                    tag=tag,
+                    groupId=self._target_id,
+                )
+            )
+
+        def GetTagList(self):
+            if self._target_type != "group":
+                raise ValueError("GetTagList必须使用To('group', group_id)指定群组")
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/tag/list",
+                    _account_id=self._account_id,
+                    groupId=self._target_id,
+                )
+            )
+
+        def AddUserTag(self, user_id: str, tag: str):
+            if self._target_type != "group":
+                raise ValueError("AddUserTag必须使用To('group', group_id)指定群组")
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/tag/user-relate",
+                    _account_id=self._account_id,
+                    userId=user_id,
+                    tag=tag,
+                    groupId=self._target_id,
+                )
+            )
+
+        def RemoveUserTag(self, user_id: str, tag: str):
+            if self._target_type != "group":
+                raise ValueError("RemoveUserTag必须使用To('group', group_id)指定群组")
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/tag/user-relate-cancel",
+                    _account_id=self._account_id,
+                    userId=user_id,
+                    tag=tag,
+                    groupId=self._target_id,
+                )
+            )
+
+        def SetMsgTypeLimit(self, types: str):
+            if self._target_type != "group":
+                raise ValueError(
+                    "SetMsgTypeLimit必须使用To('group', group_id)指定群组"
+                )
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint="/group/msg-type-limit",
+                    _account_id=self._account_id,
+                    groupId=self._target_id,
+                    type=types,
+                )
+            )
+
         def Stream(self, content_type: str, content_generator, **kwargs):
             return asyncio.create_task(
                 self._adapter.send_stream(
