@@ -467,6 +467,30 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
+        def GetMessages(
+            self, message_id: str = None, before: int = 0, after: int = 0
+        ):
+            if not self._target_id or not self._target_type:
+                raise ValueError(
+                    "GetMessages必须使用To(target_type, target_id)指定目标。"
+                    "例如: Send.To('group', '123').GetMessages(before=10)"
+                )
+            query = {
+                "chat-id": self._target_id,
+                "chat-type": self._target_type,
+            }
+            if message_id is not None:
+                query["message-id"] = message_id
+            if before:
+                query["before"] = before
+            if after:
+                query["after"] = after
+            return asyncio.create_task(
+                self._adapter.get_messages(
+                    _account_id=self._account_id, **query
+                )
+            )
+
         def Stream(self, content_type: str, content_generator, **kwargs):
             return asyncio.create_task(
                 self._adapter.send_stream(
@@ -1308,6 +1332,30 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         if "echo" in params:
             resp["echo"] = params["echo"]
+
+        return resp
+
+    async def get_messages(self, _account_id: str = None, **params):
+        bot_name, bot = self._resolve_account(_account_id)
+
+        self.logger.debug(
+            f"Bot {bot_name} (bot_id: {bot.bot_id}) 获取消息列表 参数:{params}"
+        )
+
+        raw_response = await self._net_request(
+            "GET", "/bot/messages", params=params, bot_token=bot.token
+        )
+
+        is_ok = raw_response.get("code") == 1
+        if is_ok:
+            resp = self.make_response(data=raw_response.get("data"), raw=raw_response)
+        else:
+            resp = self.make_error(
+                retcode=34000 + (raw_response.get("code") or 0),
+                message=raw_response.get("msg", ""),
+                raw=raw_response,
+            )
+        resp["self"] = {"user_id": bot.bot_id}
 
         return resp
 

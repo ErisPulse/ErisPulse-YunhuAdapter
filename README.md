@@ -122,6 +122,13 @@ await yunhu.Send.To("group", "group456").RemoveUserTag("user789", "VIP")
 
 # 群组管理：限制消息类型
 await yunhu.Send.To("group", "group456").SetMsgTypeLimit("text,image,video")
+
+# 获取会话历史消息（用户/群均可）
+# 获取群最近10条消息
+result = await yunhu.Send.To("group", "group456").GetMessages(before=10)
+
+# 获取指定消息ID前后各10条消息（共21条）
+result = await yunhu.Send.To("group", "group456").GetMessages(message_id="msg_xxx", before=10, after=10)
 ```
 
 > Text/Html/Markdown 的发送支持使用list传入多个id进行批量发送 | 而不再推荐使用 await yunhu.Send.To("user", ["user1", "user2"]).Batch("批量通知")

@@ -62,6 +62,21 @@ await yunhu.Send.To("group", group_id).Kick(user_id)
 - `.RemoveUserTag(user_id: str, tag: str)`：给用户移除标签。机器人需要`允许控制标签组`权限。
 - `.SetMsgTypeLimit(types: str)`：控制群内消息类型。`types`为消息类型名称，多个用逗号分隔（如`"text,image,video"`），空字符串表示不限制。机器人需要`允许修改群信息`权限。
 
+### 消息查询方法
+
+获取指定会话（用户/群）的历史消息列表，需要通过链式语法指定目标，例如：
+```python
+from ErisPulse.Core import adapter
+yunhu = adapter.get("yunhu")
+
+result = await yunhu.Send.To("group", group_id).GetMessages(before=10)
+```
+
+- `.GetMessages(message_id: str = None, before: int = 0, after: int = 0)`：获取会话历史消息。返回包含`list`数组和`total`总数的响应数据。
+  - `message_id`：消息ID（可选）。不填时配合`before`返回最近的N条消息。
+  - `before`：返回指定消息ID前N条（默认0）。
+  - `after`：返回指定消息ID后N条（默认0）。
+
 Board board_type 支持以下类型：
 - `local`：指定用户看板
 - `global`：全局看板
@@ -154,6 +169,25 @@ await yunhu.Send.To("group", group_id).SetMsgTypeLimit("text,image,video")
 
 # 取消消息类型限制
 await yunhu.Send.To("group", group_id).SetMsgTypeLimit("")
+```
+
+### 消息查询示例
+
+```python
+from ErisPulse.Core import adapter
+yunhu = adapter.get("yunhu")
+
+# 获取群最近10条消息（共返回10条）
+result = await yunhu.Send.To("group", group_id).GetMessages(before=10)
+
+# 获取群中指定消息ID前10条（共返回11条）
+result = await yunhu.Send.To("group", group_id).GetMessages(message_id="msg_xxx", before=10)
+
+# 获取群中指定消息ID前后各10条（共返回21条）
+result = await yunhu.Send.To("group", group_id).GetMessages(message_id="msg_xxx", before=10, after=10)
+
+# 获取用户会话历史消息
+result = await yunhu.Send.To("user", user_id).GetMessages(message_id="msg_xxx", before=10)
 ```
 
 ### OneBot12消息支持
