@@ -311,7 +311,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                     chatType=self._target_type if scope == "local" else None,
                     contentType=kwargs.get("content_type", "text"),
                     content=content,
-                    memberId=kwargs.get("member_id", None),
                     expireTime=kwargs.get("expire_time", 0),
                 )
             )
@@ -324,9 +323,8 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self._adapter.call_api(
                     endpoint=endpoint,
                     _account_id=self._account_id,
-                    chatId=kwargs.get("chat_id") if scope == "local" else None,
-                    chatType=kwargs.get("chat_type") if scope == "local" else None,
-                    memberId=kwargs.get("member_id", ""),
+                    chatId=self._target_id if scope == "local" else None,
+                    chatType=self._target_type if scope == "local" else None,
                 )
             )
 
