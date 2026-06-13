@@ -475,6 +475,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                     "GetMessages必须使用To(target_type, target_id)指定目标。"
                     "例如: Send.To('group', '123').GetMessages(before=10)"
                 )
+            if not before and not after:
+                raise ValueError(
+                    "GetMessages必须指定 before 或 after (>0)，"
+                    "否则服务器不会返回任何消息。"
+                    "例如: Send.To('group', '123').GetMessages(before=10)"
+                )
             query = {
                 "chat-id": self._target_id,
                 "chat-type": self._target_type,

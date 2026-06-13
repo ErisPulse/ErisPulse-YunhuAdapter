@@ -72,10 +72,11 @@ yunhu = adapter.get("yunhu")
 result = await yunhu.Send.To("group", group_id).GetMessages(before=10)
 ```
 
-- `.GetMessages(message_id: str = None, before: int = 0, after: int = 0)`：获取会话历史消息。返回包含`list`数组和`total`总数的响应数据。
+- `.GetMessages(message_id: str = None, before: int = None, after: int = None)`：获取会话历史消息。返回包含`list`数组和`total`总数的响应数据。
   - `message_id`：消息ID（可选）。不填时配合`before`返回最近的N条消息。
-  - `before`：返回指定消息ID前N条（默认0）。
-  - `after`：返回指定消息ID后N条（默认0）。
+  - `before`：返回指定消息ID前N条。
+  - `after`：返回指定消息ID后N条。
+  - > **注意：** `before` 和 `after` 至少需指定一个且大于0，否则服务器不会返回任何消息。
 
 Board board_type 支持以下类型：
 - `local`：指定用户看板
