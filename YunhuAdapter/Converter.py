@@ -10,8 +10,9 @@
 import re
 import time
 import uuid
-from ErisPulse.Core import logger
 from typing import Dict, List, Optional
+
+from ErisPulse.Core import logger
 
 
 class YunhuConverter:
@@ -110,16 +111,18 @@ class YunhuConverter:
 
         at_user_ids: List[str] = content.get("at", [])
         raw_text = content.get("text", "") if content_type == "text" else ""
-        at_names = re.findall(r'@([\S]+)', raw_text)
+        at_names = re.findall(r"@([\S]+)", raw_text)
         mention_segments = []
         for i, uid in enumerate(at_user_ids):
-            mention_segments.append({
-                "type": "mention",
-                "data": {
-                    "user_id": str(uid),
-                    "user_name": at_names[i] if i < len(at_names) else ""
+            mention_segments.append(
+                {
+                    "type": "mention",
+                    "data": {
+                        "user_id": str(uid),
+                        "user_name": at_names[i] if i < len(at_names) else "",
+                    },
                 }
-            })
+            )
 
         message_segments: list = []
         alt_message: list = []
@@ -131,6 +134,23 @@ class YunhuConverter:
             if text:
                 message_segments.append({"type": "text", "data": {"text": text}})
                 alt_message.append(text)
+
+        elif content_type in ("markdown", "html"):
+            # 从 markdown/html 中提取纯文本，用于命令解析
+            rich_text = content.get("text", "")
+            if rich_text:
+                # 移除 markdown/html 标记，提取纯文本
+                text = self._strip_markdown_html(rich_text)
+                if at_user_ids:
+                    text = self._strip_at_text(text)
+                if text:
+                    message_segments.append({"type": "text", "data": {"text": text}})
+                    alt_message.append(text)
+
+                # 同时保留原始的 markdown/html 内容
+                message_segments.append(
+                    {"type": f"yunhu_{content_type}", "data": {"content": rich_text}}
+                )
 
         elif content_type == "image":
             media_data = self._build_media_data(content, "image")
@@ -208,7 +228,7 @@ class YunhuConverter:
             logger.debug(f"Received command: {command_data}")
             base_event["yunhu_command"] = command_data
 
-            if command_data and content_type == "text":
+            if command_data:
                 command_name = command_data.get("name", "")
                 args = command_data.get("args", "")
                 if command_name:
@@ -220,6 +240,50 @@ class YunhuConverter:
     def _strip_at_text(text: str) -> str:
         """移除文本中的 @昵称 部分"""
         return re.sub(r"@[\S]+\s*", "", text).strip()
+
+    @staticmethod
+    def _strip_markdown_html(rich_text: str) -> str:
+        """
+        从 Markdown/Html 中提取纯文本
+        用于命令解析和降级处理
+        """
+        if not rich_text:
+            return ""
+
+        # 移除 HTML 标记
+        text = re.sub(r"<[^>]+>", "", rich_text)
+
+        # 移除 Markdown 标记
+        # 标题 (# ## ### 等)
+        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        # 粗体 (**text** 或 __text__)
+        text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+        text = re.sub(r"__([^_]+)__", r"\1", text)
+        # 斜体 (*text* 或 _text_)
+        text = re.sub(r"(?<!\*)\*(?!\*)([^*]+)(?<!\*)\*(?!\*)", r"\1", text)
+        text = re.sub(r"(?<!_)_(?!_)([^_]+)(?<!_)_(?!_)", r"\1", text)
+        # 删除线 (~~text~~)
+        text = re.sub(r"~~([^~]+)~~", r"\1", text)
+        # 行内代码 (`code`)
+        text = re.sub(r"`([^`]+)`", r"\1", text)
+        # 代码块 (```code```)
+        text = re.sub(r"```[\s\S]*?```", "", text)
+        # 链接 [text](url) -> text
+        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+        # 图片 ![alt](url) -> [图片]
+        text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", "", text)
+        # 引用 (> text)
+        text = re.sub(r"^>\s+", "", text, flags=re.MULTILINE)
+        # 无序列表 (- text 或 * text 或 + text)
+        text = re.sub(r"^[\-\*+]\s+", "", text, flags=re.MULTILINE)
+        # 有序列表 (1. text)
+        text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
+
+        # 清理多余的空格和换行
+        text = re.sub(r"\s+", " ", text)
+        text = text.strip()
+
+        return text
 
     def _handle_friend_event(
         self, event_type: str, event_data: Dict, base_event: Dict
