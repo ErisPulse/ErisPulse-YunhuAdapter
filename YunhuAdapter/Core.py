@@ -3,11 +3,12 @@ import io
 import json
 import re
 import time
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
 import filetype
 from ErisPulse import sdk
-from ErisPulse.Core import client, router, ClientWebSocket
+from ErisPulse.Core import ClientWebSocket, client, router
 from ErisPulse.Core.Bases.errors import ClientError, ClientTimeoutError
 from ErisPulse.Core.Bases.websocket import WSMessage
 from ErisPulse.runtime.config_schema import BotAccountConfig
@@ -233,7 +234,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             **kwargs,
         ):
             if content_type in ["text", "html", "markdown"]:
-                self.logger.debug(
+                sdk.logger.debug(
                     "批量发送文本/富文本消息时, 更推荐的方法是使用"
                     " Send.To('user'/'group', user_ids: list/group_ids: list).Text/Html/Markdown(message, buttons = None, parent_id = None)"
                 )
@@ -455,9 +456,7 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         def SetMsgTypeLimit(self, types: str):
             if self._target_type != "group":
-                raise ValueError(
-                    "SetMsgTypeLimit必须使用To('group', group_id)指定群组"
-                )
+                raise ValueError("SetMsgTypeLimit必须使用To('group', group_id)指定群组")
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint="/group/msg-type-limit",
@@ -467,9 +466,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        def GetMessages(
-            self, message_id: str = None, before: int = 0, after: int = 0
-        ):
+        def GetMessages(self, message_id: str = None, before: int = 0, after: int = 0):
             if not self._target_id or not self._target_type:
                 raise ValueError(
                     "GetMessages必须使用To(target_type, target_id)指定目标。"
@@ -492,9 +489,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             if after:
                 query["after"] = after
             return asyncio.create_task(
-                self._adapter.get_messages(
-                    _account_id=self._account_id, **query
-                )
+                self._adapter.get_messages(_account_id=self._account_id, **query)
             )
 
         def Stream(self, content_type: str, content_generator, **kwargs):
@@ -798,7 +793,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 return None, None
 
             try:
-                from urllib.parse import urlparse, unquote
+                from urllib.parse import unquote, urlparse
 
                 parsed_url = urlparse(url)
                 filename = unquote(parsed_url.path.split("/")[-1]) or "downloaded_file"
@@ -1094,8 +1089,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         return "Yunhu_Adapter"
 
     def _load_accounts(self) -> dict:
-        from ErisPulse.runtime.config_schema import dict_to_dataclass
         from ErisPulse.Core.config import config as config_mgr
+        from ErisPulse.runtime.config_schema import dict_to_dataclass
 
         key = "Yunhu_Adapter.bots"
         data = config_mgr.getConfig(key)
