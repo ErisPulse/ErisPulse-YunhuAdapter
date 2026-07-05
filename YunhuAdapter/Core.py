@@ -23,18 +23,15 @@ def _mask_token(url: str) -> str:
     return re.sub(r"([?&]token=)[^&]*", r"\1***", url)
 
 
+# 用于自动探测 bot_id 的空群聊：向该群发送消息会返回包含机器人ID的错误信息。
+# 该群不包含任何机器人，因此请求始终被拒绝，不会产生实际副作用。
+PROBE_GROUP_ID = "112869497"
+
+
 @dataclass
 class YunhuBotConfig(BotAccountConfig):
     """云湖机器人账户配置"""
 
-    bot_id: str = field(
-        default="",
-        metadata={
-            "description": "机器人ID",
-            "required": True,
-            "webui": {"widget": "text", "group": "basic", "order": 1},
-        },
-    )
     token: str = field(
         default="",
         metadata={
@@ -989,7 +986,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     upload_filename = file_name
 
             self._adapter.logger.debug(
-                f"Bot {bot_name} (bot_id: {bot.bot_id}) 上传文件: {upload_filename}"
+                f"Bot {bot_name} (bot_id: {self._adapter._bot_ids.get(bot_name, '')}) 上传文件: {upload_filename}"
             )
             data.add_field(
                 name=content_type,
@@ -1111,7 +1108,6 @@ class YunhuAdapter(sdk.BaseAdapter):
                 server_config = old_config.get("server", {})
                 data = {
                     "default": {
-                        "bot_id": "",
                         "token": old_config.get("token", ""),
                         "mode": "ws",
                         "webhook_path": server_config.get("path", "/webhook"),
@@ -1119,13 +1115,12 @@ class YunhuAdapter(sdk.BaseAdapter):
                     }
                 }
                 self.logger.warning(
-                    "已临时加载旧配置为默认bot，请尽快迁移到新格式并设置正确的bot_id"
+                    "已临时加载旧配置为默认bot，请尽快迁移到新格式"
                 )
             else:
                 self.logger.info("未找到配置文件，创建默认bot配置")
                 data = {
                     "default": {
-                        "bot_id": "",
                         "token": "",
                         "mode": "ws",
                         "webhook_path": "/webhook",
@@ -1141,10 +1136,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         for name, account_data in data.items():
             if not isinstance(account_data, dict):
                 continue
-            if "bot_id" not in account_data or not account_data["bot_id"]:
-                self.logger.error(f"Bot {name} 缺少bot_id配置，已跳过")
-                continue
-            if "token" not in account_data:
+            if not account_data.get("token"):
                 self.logger.error(f"Bot {name} 缺少token配置，已跳过")
                 continue
 
@@ -1163,6 +1155,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         self.ws_base_url = "wss://ws.jwzhd.com/subscribe"
         self._ws_tasks: Dict[str, asyncio.Task] = {}
         self._ws_connections: Dict[str, ClientWebSocket] = {}
+        self._bot_ids: Dict[str, str] = {}
         self._is_running = False
 
         self.convert = self._setup_converter()
@@ -1272,7 +1265,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         query_params = "&".join([f"{k}={v}" for k, v in params.items()])
         full_url = f"{url}&{query_params}"
         self.logger.debug(
-            f"Bot {bot_name} (bot_id: {bot.bot_id}) 准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}"
+            f"Bot {bot_name} (bot_id: {self._bot_ids.get(bot_name, '')}) 准备发送流式消息到 {target_id}，会话类型: {conversation_type}, 内容类型: {content_type}"
         )
         headers = {"Content-Type": "text/plain"}
         try:
@@ -1308,7 +1301,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             message=raw_response.get("msg", ""),
             raw=raw_response,
         )
-        resp["self"] = {"user_id": bot.bot_id}
+        resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
 
         if "echo" in kwargs:
             resp["echo"] = kwargs["echo"]
@@ -1319,7 +1312,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         bot_name, bot = self._resolve_account(_account_id)
 
         self.logger.debug(
-            f"Bot {bot_name} (bot_id: {bot.bot_id}) 调用API:{endpoint} 参数:{params}"
+            f"Bot {bot_name} (bot_id: {self._bot_ids.get(bot_name, '')}) 调用API:{endpoint} 参数:{params}"
         )
 
         raw_response = await self._net_request(
@@ -1366,7 +1359,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             if is_batch:
                 resp["message_id"] = []
 
-        resp["self"] = {"user_id": bot.bot_id}
+        resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
 
         if "echo" in params:
             resp["echo"] = params["echo"]
@@ -1377,7 +1370,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         bot_name, bot = self._resolve_account(_account_id)
 
         self.logger.debug(
-            f"Bot {bot_name} (bot_id: {bot.bot_id}) 获取消息列表 参数:{params}"
+            f"Bot {bot_name} (bot_id: {self._bot_ids.get(bot_name, '')}) 获取消息列表 参数:{params}"
         )
 
         raw_response = await self._net_request(
@@ -1393,7 +1386,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 message=raw_response.get("msg", ""),
                 raw=raw_response,
             )
-        resp["self"] = {"user_id": bot.bot_id}
+        resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
 
         return resp
 
@@ -1410,7 +1403,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 if bot_name:
                     bot = self.accounts.get(bot_name)
 
-                onebot_event = self.convert(data, bot.bot_id if bot else None)
+                onebot_event = self.convert(data, self._bot_ids.get(bot_name) if bot_name else None)
                 self.logger.debug(
                     f"Bot {bot_name} OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}"
                 )
@@ -1433,14 +1426,14 @@ class YunhuAdapter(sdk.BaseAdapter):
         while self._is_running:
             try:
                 self.logger.info(
-                    f"Bot {bot_name} (ID: {bot.bot_id}) 正在连接WebSocket: {_mask_token(ws_url)}"
+                    f"Bot {bot_name} (ID: {self._bot_ids.get(bot_name, '')}) 正在连接WebSocket: {_mask_token(ws_url)}"
                 )
                 ws = await client.ws_connect(ws_url, heartbeat=30)
                 self._ws_connections[bot_name] = ws
                 self.logger.info(
-                    f"Bot {bot_name} (ID: {bot.bot_id}) WebSocket连接已建立"
+                    f"Bot {bot_name} (ID: {self._bot_ids.get(bot_name, '')}) WebSocket连接已建立"
                 )
-                await self.emit_meta("connect", bot.bot_id)
+                await self.emit_meta("connect", self._bot_ids.get(bot_name, ""))
                 self._ws_tasks[bot_name] = asyncio.create_task(
                     self._ws_listen(bot_name)
                 )
@@ -1470,7 +1463,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             self.logger.error(f"Bot {bot_name} WebSocket监听异常: {str(e)}")
         finally:
             try:
-                await self.emit_meta("disconnect", bot.bot_id)
+                await self.emit_meta("disconnect", self._bot_ids.get(bot_name, ""))
             except Exception:
                 pass
             if bot_name in self._ws_connections:
@@ -1521,8 +1514,26 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
             self.logger.info(
-                f"已注册Bot {bot_name} (ID: {bot.bot_id}) 的Webhook路由: {path}"
+                f"已注册Bot {bot_name} (ID: {self._bot_ids.get(bot_name, '')}) 的Webhook路由: {path}"
             )
+
+    async def _detect_bot_id(self, token: str) -> Optional[str]:
+        """向空群发送消息，从拒绝错误中解析出机器人ID。"""
+        try:
+            resp = await self._net_request(
+                "POST", "/bot/send",
+                {"recvId": PROBE_GROUP_ID, "recvType": "group",
+                 "contentType": "text", "content": {"text": "."}},
+                bot_token=token, max_retries=1,
+            )
+            msg = resp.get("msg", "") if isinstance(resp, dict) else ""
+            match = re.search(r"机器人\(ID:\s*([^)\s]+)\)", msg)
+            if match:
+                self.logger.info(f"自动探测到机器人ID: {match.group(1)}")
+                return match.group(1)
+        except Exception as e:
+            self.logger.error(f"自动探测bot_id失败: {e}")
+        return None
 
     async def start(self):
         self._is_running = True
@@ -1531,6 +1542,11 @@ class YunhuAdapter(sdk.BaseAdapter):
         if not enabled_bots:
             self.logger.warning("没有配置任何启用的机器人，适配器启动但无可用Bot")
             return
+
+        # 统一探测所有机器人的bot_id（运行时数据）
+        for bot_name, bot in enabled_bots.items():
+            if not self._bot_ids.get(bot_name):
+                self._bot_ids[bot_name] = await self._detect_bot_id(bot.token) or ""
 
         webhook_bots = {n: b for n, b in enabled_bots.items() if b.mode != "ws"}
         ws_bots = {n: b for n, b in enabled_bots.items() if b.mode == "ws"}
@@ -1552,9 +1568,9 @@ class YunhuAdapter(sdk.BaseAdapter):
                     methods=["POST"],
                 )
                 self.logger.info(
-                    f"已注册Bot {bot_name} (ID: {bot.bot_id}) 的Webhook路由: {path}"
+                    f"已注册Bot {bot_name} (ID: {self._bot_ids.get(bot_name, '')}) 的Webhook路由: {path}"
                 )
-                await self.emit_meta("connect", bot.bot_id)
+                await self.emit_meta("connect", self._bot_ids.get(bot_name, ""))
 
         for bot_name in ws_bots:
             self._ws_tasks[bot_name] = asyncio.create_task(self._ws_connect(bot_name))
@@ -1593,7 +1609,7 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         for bot_name, bot in self.enabled_accounts.items():
             try:
-                await self.emit_meta("disconnect", bot.bot_id)
+                await self.emit_meta("disconnect", self._bot_ids.get(bot_name, ""))
             except Exception:
                 pass
         self.logger.info("云湖适配器已关闭")
