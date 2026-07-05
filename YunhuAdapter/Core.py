@@ -6,10 +6,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+import aiohttp
 import filetype
 from ErisPulse import sdk
 from ErisPulse.Core import ClientWebSocket, client, router
-from ErisPulse.Core.Bases.errors import ClientError, ClientTimeoutError
+from ErisPulse.Core.Bases.errors import (
+    ClientConnectionError,
+    ClientError,
+    ClientTimeoutError,
+)
 from ErisPulse.Core.Bases.websocket import WSMessage
 from ErisPulse.runtime.config_schema import BotAccountConfig
 
@@ -1175,6 +1180,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         data: Dict = None,
         params: Dict = None,
         bot_token: str = None,
+        max_retries: int = 2,
     ) -> Dict:
         token = bot_token if bot_token else ""
         url = f"{self.base_url}{endpoint}?token={token}"
@@ -1186,32 +1192,63 @@ class YunhuAdapter(sdk.BaseAdapter):
             f"[{endpoint}]|[{method}] 请求数据: {json_data} | 参数: {params}"
         )
 
-        try:
-            resp = await client.request(
-                method, url, data=json_data, params=params, headers=headers
-            )
-            if "application/json" in (resp.content_type or ""):
-                result = await resp.json()
-                self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
-                return result
-            else:
-                text = await resp.text()
-                self.logger.warning(f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}")
-                return {
-                    "error": "Invalid content type",
-                    "content_type": resp.content_type,
-                    "status": resp.status,
-                    "raw": text,
-                }
-        except ClientTimeoutError:
-            self.logger.error(f"请求超时: {_mask_token(url)}")
-            raise
-        except ClientError as e:
-            self.logger.error(f"网络请求失败: {_mask_token(url)}, 错误: {str(e)}")
-            raise
-        except Exception as e:
-            self.logger.error(f"请求异常: {_mask_token(url)}, 错误: {str(e)}")
-            raise
+        # 瞬态错误（连接被关闭/重置、超时）自动重试。
+        # "Connection closed" 常见于连接池中的 keep-alive 连接已被服务端关闭，
+        # 此时请求实际并未送达，重试是安全的。
+        last_exc: Optional[BaseException] = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await client.request(
+                    method, url, data=json_data, params=params, headers=headers
+                )
+                if "application/json" in (resp.content_type or ""):
+                    result = await resp.json()
+                    self.logger.debug(f"[{endpoint}]|[{method}] 响应数据: {result}")
+                    return result
+                else:
+                    text = await resp.text()
+                    self.logger.warning(
+                        f"[{endpoint}] 非JSON响应，原始内容: {text[:500]}"
+                    )
+                    return {
+                        "error": "Invalid content type",
+                        "content_type": resp.content_type,
+                        "status": resp.status,
+                        "raw": text,
+                    }
+            except (
+                ClientTimeoutError,
+                ClientConnectionError,
+                aiohttp.ClientError,
+            ) as e:
+                # 捕获 ErisPulse 包装的瞬态错误，以及未被转换而直接泄漏的底层
+                # aiohttp 异常（某些版本下响应体读取阶段抛出的异常不会被转换）。
+                last_exc = e
+                if attempt < max_retries:
+                    wait = min(2**attempt, 4)
+                    self.logger.warning(
+                        f"[{endpoint}] 请求失败（第 {attempt + 1}/{max_retries + 1} 次），"
+                        f"{wait}s 后重试: {type(e).__name__}: {e}"
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                self.logger.error(
+                    f"[{endpoint}] 重试 {max_retries} 次后仍失败 "
+                    f"({type(e).__name__}): {_mask_token(url)}"
+                )
+                raise
+            except ClientError as e:
+                self.logger.error(f"网络请求失败: {_mask_token(url)}, 错误: {str(e)}")
+                raise
+            except Exception as e:
+                # 非瞬态错误（如 JSON 解码失败），不重试
+                self.logger.error(
+                    f"请求异常: {_mask_token(url)}, 错误: {type(e).__name__}: {str(e)}"
+                )
+                raise
+
+        # 理论上不可达：重试耗尽时循环内已 raise
+        raise last_exc  # type: ignore[misc]
 
     async def send_stream(
         self,
