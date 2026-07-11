@@ -1094,15 +1094,37 @@ class YunhuAdapter(sdk.BaseAdapter):
         from ErisPulse.Core.config import config as config_mgr
         from ErisPulse.runtime.config_schema import dict_to_dataclass
 
-        key = "Yunhu_Adapter.bots"
+        key = f"{self._get_config_key()}.accounts"
         data = config_mgr.getConfig(key)
 
+        # 过滤掉无 token 的账户（可能是 _ensure_accounts_exist 自动生成的默认模板）
+        if data:
+            data = {
+                name: cfg for name, cfg in data.items()
+                if isinstance(cfg, dict) and cfg.get("token")
+            }
+
         if not data:
-            old_config = config_mgr.getConfig("Yunhu_Adapter")
+            # 尝试从旧 .bots 配置迁移
+            old_bots_key = f"{self._get_config_key()}.bots"
+            old_bots_data = config_mgr.getConfig(old_bots_key)
+            if old_bots_data:
+                migrated = {
+                    name: cfg for name, cfg in old_bots_data.items()
+                    if isinstance(cfg, dict) and cfg.get("token")
+                }
+                if migrated:
+                    config_mgr.setConfig(key, migrated, immediate=True)
+                    self.logger.info(f"已将旧配置 {old_bots_key} 自动迁移到 {key}")
+                    data = migrated
+
+        if not data:
+            # 尝试从旧顶层格式迁移（Yunhu_Adapter.token）
+            old_config = config_mgr.getConfig(self._get_config_key())
             if old_config and "token" in old_config:
                 self.logger.warning("检测到旧格式配置，建议迁移到新格式")
                 self.logger.warning(
-                    "迁移方法：将现有配置移动到 Yunhu_Adapter.bots.default 下"
+                    "迁移方法：将现有配置移动到 Yunhu_Adapter.accounts.default 下"
                 )
 
                 server_config = old_config.get("server", {})
@@ -1114,30 +1136,32 @@ class YunhuAdapter(sdk.BaseAdapter):
                         "enabled": True,
                     }
                 }
+                config_mgr.setConfig(key, data, immediate=True)
                 self.logger.warning(
-                    "已临时加载旧配置为默认bot，请尽快迁移到新格式"
+                    "已临时加载旧配置为默认账户，请尽快迁移到新格式"
                 )
-            else:
-                self.logger.info("未找到配置文件，创建默认bot配置")
-                data = {
-                    "default": {
-                        "token": "",
-                        "mode": "ws",
-                        "webhook_path": "/webhook",
-                        "enabled": True,
-                    }
+
+        if not data:
+            self.logger.info("未找到配置文件，创建默认账户配置")
+            data = {
+                "default": {
+                    "token": "",
+                    "mode": "ws",
+                    "webhook_path": "/webhook",
+                    "enabled": True,
                 }
-                try:
-                    config_mgr.setConfig(key, data)
-                except Exception as e:
-                    self.logger.error(f"保存默认bot配置失败: {str(e)}")
+            }
+            try:
+                config_mgr.setConfig(key, data)
+            except Exception as e:
+                self.logger.error(f"保存默认账户配置失败: {str(e)}")
 
         accounts = {}
         for name, account_data in data.items():
             if not isinstance(account_data, dict):
                 continue
             if not account_data.get("token"):
-                self.logger.error(f"Bot {name} 缺少token配置，已跳过")
+                self.logger.error(f"账户 {name} 缺少token配置，已跳过")
                 continue
 
             instance = dict_to_dataclass(YunhuBotConfig, account_data)

@@ -464,27 +464,26 @@ async def handle_message(event):
 
 ```toml
 # config.toml
-[Yunhu_Adapter.bots.bot1]
-bot_id = "30535459"  # 机器人ID（必填）
+[Yunhu_Adapter.accounts.bot1]
 token = "your_bot1_token"  # 机器人token（必填）
+mode = "ws"  # 接收模式（可选，默认为"ws"）
 webhook_path = "/webhook/bot1"  # Webhook路径（可选，默认为"/webhook"）
 enabled = true  # 是否启用（可选，默认为true）
 
-[Yunhu_Adapter.bots.bot2]
-bot_id = "12345678"  # 第二个机器人的ID
+[Yunhu_Adapter.accounts.bot2]
 token = "your_bot2_token"  # 第二个机器人的token
 webhook_path = "/webhook/bot2"  # 独立的webhook路径
 enabled = true
 ```
 
 **配置项说明：**
-- `bot_id`：机器人的唯一标识ID（必填），用于标识是哪个机器人触发的事件
 - `token`：云湖平台提供的API token（必填）
+- `mode`：接收模式（可选，默认为"ws"，可选值："ws"、"webhook"）
 - `webhook_path`：接收云湖事件的HTTP路径（可选，默认为"/webhook"）
-- `enabled`：是否启用该bot（可选，默认为true）
+- `enabled`：是否启用该账户（可选，默认为true）
 
 **重要提示：**
-1. 云湖平台的事件中不包含机器人ID，因此必须在配置中明确指定`bot_id`
+1. 云湖平台的机器人ID在运行时自动检测，无需在配置中指定
 2. 每个bot都应该有独立的`webhook_path`，以便接收各自的webhook事件
 3. 在云湖平台配置webhook时，请为每个bot配置对应的URL，例如：
    - Bot1: `https://your-domain.com/webhook/bot1`
