@@ -93,13 +93,25 @@ class YunhuAdapter(sdk.BaseAdapter):
         def __init__(self, adapter, target_type=None, target_id=None, account_id=None):
             super().__init__(adapter, target_type, target_id, account_id)
             self._buttons = None
+            self._board_expire: int = 0
+            self._board_member_id: Optional[str] = None
 
         def Buttons(self, buttons: List):
             self._buttons = buttons
             return self
 
+        def Expire(self, duration: int):
+            self._board_expire = duration
+            return self
+
+        def ForMember(self, member_id: str):
+            self._board_member_id = member_id
+            return self
+
         def _reset_modifiers(self):
             self._buttons = None
+            self._board_expire = 0
+            self._board_member_id = None
 
         def _build_content_with_modifiers(
             self, text: str, content_type: str, buttons: List = None
@@ -304,30 +316,106 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
-        def Board(self, scope: str, content: str, **kwargs):
-            endpoint = "/bot/board" if scope == "local" else "/bot/board-all"
+        def Board(self, scope_or_content, content=None, content_type="text", **kwargs):
+            """
+            发布看板（终止方法）
+
+            支持两种调用风格：
+
+            1. 链式风格（推荐）：作用域由 To() 自动推断
+               - 指定了 To(target_type, target_id) -> 本地看板（/bot/board）
+               - 未指定 To() -> 全局看板（/bot/board-all）
+               - 可选链式修饰：.Expire(duration) 设过期（秒）、.ForMember(member_id) 设群成员看板
+
+               >>> await yunhu.Send.To("group", "123").Board("公告")
+               >>> await yunhu.Send.To("group", "123").Expire(60).Board("60秒后过期", content_type="markdown")
+               >>> await yunhu.Send.To("group", "123").ForMember("uid").Board("仅你可见")
+               >>> await yunhu.Send.Board("全局公告")
+
+            2. 旧式风格（兼容）：显式传入 scope
+               >>> await yunhu.Send.To("group", "123").Board("local", "公告")
+               >>> await yunhu.Send.Board("global", "全局公告", expire_time=60)
+            """
+            if content is not None:
+                scope = scope_or_content
+                is_local = scope == "local"
+            else:
+                content = scope_or_content
+                is_local = bool(self._target_id and self._target_type)
+
+            if "expire_time" in kwargs:
+                duration = kwargs.pop("expire_time")
+            else:
+                duration = self._board_expire
+
+            member_id = kwargs.pop("member_id", None) or self._board_member_id
+
+            endpoint = "/bot/board" if is_local else "/bot/board-all"
+            expire_time = (
+                int(time.time()) + duration if duration and duration > 0 else 0
+            )
+
+            params = {
+                "contentType": content_type,
+                "content": content,
+                "expireTime": expire_time,
+            }
+            if is_local:
+                params["chatId"] = self._target_id
+                params["chatType"] = self._target_type
+                if member_id is not None:
+                    params["memberId"] = member_id
+            params.update(kwargs)
+
+            self._reset_modifiers()
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint=endpoint,
                     _account_id=self._account_id,
-                    chatId=self._target_id if scope == "local" else None,
-                    chatType=self._target_type if scope == "local" else None,
-                    contentType=kwargs.get("content_type", "text"),
-                    content=content,
-                    expireTime=kwargs.get("expire_time", 0),
+                    **params,
                 )
             )
 
-        def DismissBoard(self, scope: str, **kwargs):
+        def DismissBoard(self, scope=None, **kwargs):
+            """
+            撤销看板（终止方法）
+
+            支持两种调用风格：
+
+            1. 链式风格（推荐）：作用域由 To() 自动推断
+               >>> await yunhu.Send.To("group", "123").DismissBoard()
+               >>> await yunhu.Send.To("group", "123").ForMember("uid").DismissBoard()
+               >>> await yunhu.Send.DismissBoard()
+
+            2. 旧式风格（兼容）：显式传入 scope
+               >>> await yunhu.Send.To("group", "123").DismissBoard("local")
+               >>> await yunhu.Send.DismissBoard("global")
+            """
+            if scope is not None:
+                is_local = scope == "local"
+            else:
+                is_local = bool(self._target_id and self._target_type)
+
+            member_id = kwargs.pop("member_id", None) or self._board_member_id
+
             endpoint = (
-                "/bot/board-dismiss" if scope == "local" else "/bot/board-all-dismiss"
+                "/bot/board-dismiss" if is_local else "/bot/board-all-dismiss"
             )
+
+            params = {}
+            if is_local:
+                params["chatId"] = self._target_id
+                params["chatType"] = self._target_type
+                if member_id is not None:
+                    params["memberId"] = member_id
+            params.update(kwargs)
+
+            self._reset_modifiers()
             return asyncio.create_task(
                 self._adapter.call_api(
                     endpoint=endpoint,
                     _account_id=self._account_id,
-                    chatId=self._target_id if scope == "local" else None,
-                    chatType=self._target_type if scope == "local" else None,
+                    **params,
                 )
             )
 

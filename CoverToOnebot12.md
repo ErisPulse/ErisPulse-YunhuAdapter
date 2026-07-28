@@ -981,21 +981,23 @@ await yunhu.Send.To("group", "123").Edit(
 ### 8. 公告看板
 
 ```python
-# 发布本地公告（指定群）
+# 发布本地公告（指定 To 目标即为本地）
 await yunhu.Send.To("group", "123").Board(
-    scope="local",
     content="公告内容",
     content_type="text"
 )
 
-# 发布全局公告
+# 带过期与指定成员（链式修饰）
+await yunhu.Send.To("group", "123").Expire(60).ForMember("uid").Board("公告")
+await yunhu.Send.Expire(3600).Board(content="60分钟后过期")
+
+# 发布全局公告（未指定 To 即为全局）
 await yunhu.Send.Board(
-    scope="global",
     content="全局公告",
     content_type="text"
 )
 
-# 撤销公告
-await yunhu.Send.To("group", "123").DismissBoard(scope="local")
-await yunhu.Send.DismissBoard(scope="global")
+# 撤销公告（作用域同样由 To() 推断）
+await yunhu.Send.To("group", "123").DismissBoard()
+await yunhu.Send.DismissBoard()
 ```

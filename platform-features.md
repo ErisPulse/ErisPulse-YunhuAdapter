@@ -38,8 +38,8 @@ await yunhu.Send.To("user", user_id).Text("Hello World!")
 - `.Batch(target_ids: List[str], message: str, content_type: str = "text", **kwargs)`：批量发送消息。
 - `.Edit(msg_id: str, text: str, content_type: str = "text", buttons: List = None)`：编辑已有消息。
 - `.Recall(msg_id: str)`：撤回消息。
-- `.Board(scope: str, content: str, **kwargs)`：发布公告看板，scope支持`local`和`global`。
-- `.DismissBoard(scope: str, **kwargs)`：撤销公告看板。
+- `.Board(content: str, content_type: str = "text")`：发布公告看板。作用域由 `To()` 推断（有目标=本地，无目标=全局）。链式修饰 `.Expire(duration)` 设过期、`.ForMember(member_id)` 设群成员看板。
+- `.DismissBoard()`：撤销公告看板。作用域同样由 `To()` 推断，支持 `.ForMember(member_id)`。
 - `.Stream(content_type: str, content_generator: AsyncGenerator, **kwargs)`：发送流式消息。
 
 ### 群组管理方法
@@ -78,9 +78,9 @@ result = await yunhu.Send.To("group", group_id).GetMessages(before=10)
   - `after`：返回指定消息ID后N条。
   - > **注意：** `before` 和 `after` 至少需指定一个且大于0，否则服务器不会返回任何消息。
 
-Board board_type 支持以下类型：
-- `local`：指定用户看板
-- `global`：全局看板
+Board 作用域由 `To()` 自动推断：
+- 指定 `To(target_type, target_id)` → 本地看板（指定用户/群组）
+- 未指定 `To()` → 全局看板
 
 ### 按钮参数说明
 

@@ -84,14 +84,14 @@ async def stream_generator():
 
 await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
 
-# 发布全局公告
-await yunhu.Send.Board("global", "重要公告")
+# 发布全局公告（无 To 即为全局）
+await yunhu.Send.Expire(3600).Board("重要公告")
 
-# 发布指定用户看板
-await yunhu.Send.To("user", "user123").Board("local", "指定用户看板")
+# 发布指定用户看板（有 To 即为本地）
+await yunhu.Send.To("user", "user123").Board("指定用户看板")
 
 # 撤销看板
-await yunhu.Send.To("group", "group456").DismissBoard("local")
+await yunhu.Send.To("group", "group456").DismissBoard()
 
 # 群组管理：移除群成员
 await yunhu.Send.To("group", "group456").Kick("user789")
