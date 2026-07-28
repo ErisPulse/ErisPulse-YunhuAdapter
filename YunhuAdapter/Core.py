@@ -315,6 +315,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                     contentType=kwargs.get("content_type", "text"),
                     content=content,
                     expireTime=kwargs.get("expire_time", 0),
+                    memberId=kwargs.get("member_id"),
                 )
             )
 

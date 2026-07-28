@@ -90,6 +90,15 @@ await yunhu.Send.Board("global", "重要公告")
 # 发布指定用户看板
 await yunhu.Send.To("user", "user123").Board("local", "指定用户看板")
 
+# 发布指定群聊指定用户看板
+await yunhu.Send.To("group", "big").Board("local", "只有特定群聊特定用户可见", member_id = "11451419180")
+
+# 发布特定时间戳后过期的看板
+await yunhu.Send.To("group", "big").Board("local", "指定时间后过期", expire_time = 1785208268)
+
+# 发送特定消息类型的看板
+await yunhu.Send.To("group", "big").Board("local", "看板内容", content_type = "text/markdown/html")
+
 # 撤销看板
 await yunhu.Send.To("group", "group456").DismissBoard("local")
 
