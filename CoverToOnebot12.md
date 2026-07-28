@@ -988,7 +988,8 @@ await yunhu.Send.To("group", "123").Board(
 )
 
 # 带过期与指定成员（链式修饰）
-await yunhu.Send.To("group", "123").Expire(60).ForMember("uid").Board("公告")
+await yunhu.Send.To("group", "123").Expire(60).ForMember("uid").Board("公告")        # 相对时长
+await yunhu.Send.To("group", "123").ExpireAt(1785208268).Board("指定时间戳过期")       # 绝对时间戳
 await yunhu.Send.Expire(3600).Board(content="60分钟后过期")
 
 # 发布全局公告（未指定 To 即为全局）

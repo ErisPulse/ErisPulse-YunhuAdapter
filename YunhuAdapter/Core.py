@@ -94,6 +94,7 @@ class YunhuAdapter(sdk.BaseAdapter):
             super().__init__(adapter, target_type, target_id, account_id)
             self._buttons = None
             self._board_expire: int = 0
+            self._board_expire_at: int = 0
             self._board_member_id: Optional[str] = None
 
         def Buttons(self, buttons: List):
@@ -104,6 +105,10 @@ class YunhuAdapter(sdk.BaseAdapter):
             self._board_expire = duration
             return self
 
+        def ExpireAt(self, timestamp: int):
+            self._board_expire_at = timestamp
+            return self
+
         def ForMember(self, member_id: str):
             self._board_member_id = member_id
             return self
@@ -111,6 +116,7 @@ class YunhuAdapter(sdk.BaseAdapter):
         def _reset_modifiers(self):
             self._buttons = None
             self._board_expire = 0
+            self._board_expire_at = 0
             self._board_member_id = None
 
         def _build_content_with_modifiers(
@@ -325,10 +331,11 @@ class YunhuAdapter(sdk.BaseAdapter):
             1. 链式风格（推荐）：作用域由 To() 自动推断
                - 指定了 To(target_type, target_id) -> 本地看板（/bot/board）
                - 未指定 To() -> 全局看板（/bot/board-all）
-               - 可选链式修饰：.Expire(duration) 设过期（秒）、.ForMember(member_id) 设群成员看板
+               - 可选链式修饰：.Expire(duration) 相对过期、.ExpireAt(timestamp) 绝对过期、.ForMember(member_id) 群成员看板
 
                >>> await yunhu.Send.To("group", "123").Board("公告")
                >>> await yunhu.Send.To("group", "123").Expire(60).Board("60秒后过期", content_type="markdown")
+               >>> await yunhu.Send.To("group", "123").ExpireAt(1785208268).Board("指定时间戳过期")
                >>> await yunhu.Send.To("group", "123").ForMember("uid").Board("仅你可见")
                >>> await yunhu.Send.Board("全局公告")
 
@@ -343,17 +350,20 @@ class YunhuAdapter(sdk.BaseAdapter):
                 content = scope_or_content
                 is_local = bool(self._target_id and self._target_type)
 
-            if "expire_time" in kwargs:
-                duration = kwargs.pop("expire_time")
-            else:
-                duration = self._board_expire
-
             member_id = kwargs.pop("member_id", None) or self._board_member_id
 
             endpoint = "/bot/board" if is_local else "/bot/board-all"
-            expire_time = (
-                int(time.time()) + duration if duration and duration > 0 else 0
-            )
+            if "expire_time" in kwargs:
+                # 旧式 kwarg：绝对时间戳（秒级），直接透传
+                expire_time = kwargs.pop("expire_time")
+            elif self._board_expire_at:
+                # 新式 .ExpireAt(timestamp)：绝对时间戳
+                expire_time = self._board_expire_at
+            elif self._board_expire:
+                # 新式 .Expire(duration)：相对时长（秒）→ 绝对时间戳
+                expire_time = int(time.time()) + self._board_expire
+            else:
+                expire_time = 0
 
             params = {
                 "contentType": content_type,

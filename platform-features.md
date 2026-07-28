@@ -6,7 +6,7 @@ YunhuAdapter 是基于云湖协议构建的适配器，整合了所有云湖功�
 
 ## 文档信息
 
-- 对应模块版本: 4.0.0
+- 对应模块版本: 4.2.0
 - 维护者: ErisPulse
 
 ## 基本信息
@@ -38,7 +38,7 @@ await yunhu.Send.To("user", user_id).Text("Hello World!")
 - `.Batch(target_ids: List[str], message: str, content_type: str = "text", **kwargs)`：批量发送消息。
 - `.Edit(msg_id: str, text: str, content_type: str = "text", buttons: List = None)`：编辑已有消息。
 - `.Recall(msg_id: str)`：撤回消息。
-- `.Board(content: str, content_type: str = "text")`：发布公告看板。作用域由 `To()` 推断（有目标=本地，无目标=全局）。链式修饰 `.Expire(duration)` 设过期、`.ForMember(member_id)` 设群成员看板。
+- `.Board(content: str, content_type: str = "text")`：发布公告看板。作用域由 `To()` 推断（有目标=本地，无目标=全局）。链式修饰：`.Expire(duration)` 相对过期（秒）、`.ExpireAt(timestamp)` 绝对过期（秒级时间戳）、`.ForMember(member_id)` 群成员看板。
 - `.DismissBoard()`：撤销公告看板。作用域同样由 `To()` 推断，支持 `.ForMember(member_id)`。
 - `.Stream(content_type: str, content_generator: AsyncGenerator, **kwargs)`：发送流式消息。
 

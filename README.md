@@ -85,22 +85,26 @@ async def stream_generator():
 await yunhu.Send.To("user", "user123").Stream("text", stream_generator())
 
 # 发布全局公告（无 To 即为全局）
-await yunhu.Send.Expire(3600).Board("重要公告")
+await yunhu.Send.Board("重要公告")
 
 # 发布指定用户看板（有 To 即为本地）
 await yunhu.Send.To("user", "user123").Board("指定用户看板")
 
-# 发布指定群聊指定用户看板
-await yunhu.Send.To("group", "big").Board("local", "只有特定群聊特定用户可见", member_id = "11451419180")
+# 发布 1 小时后过期的看板（相对时长）
+await yunhu.Send.Expire(3600).Board("一小时后过期")
 
-# 发布特定时间戳后过期的看板
-await yunhu.Send.To("group", "big").Board("local", "指定时间后过期", expire_time = 1785208268)
+# 发布指定时间戳过期的看板（绝对时间戳，秒级）
+await yunhu.Send.To("group", "big").ExpireAt(1785208268).Board("指定时间后过期")
+
+# 发布指定群聊指定用户可见的看板
+await yunhu.Send.To("group", "big").ForMember("11451419180").Board("只有特定群聊特定用户可见")
 
 # 发送特定消息类型的看板
-await yunhu.Send.To("group", "big").Board("local", "看板内容", content_type = "text/markdown/html")
+await yunhu.Send.To("group", "big").Board("看板内容", content_type="markdown")
 
 # 撤销看板
 await yunhu.Send.To("group", "group456").DismissBoard()
+await yunhu.Send.DismissBoard()
 
 # 群组管理：移除群成员
 await yunhu.Send.To("group", "group456").Kick("user789")
