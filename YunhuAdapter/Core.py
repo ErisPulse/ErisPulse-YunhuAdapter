@@ -322,6 +322,25 @@ class YunhuAdapter(sdk.BaseAdapter):
                 )
             )
 
+        def _make_dismiss_task(self, is_local: bool, member_id: Optional[str], kwargs: dict):
+            endpoint = "/bot/board-dismiss" if is_local else "/bot/board-all-dismiss"
+            params = {}
+            if is_local:
+                params["chatId"] = self._target_id
+                params["chatType"] = self._target_type
+                if member_id is not None:
+                    params["memberId"] = member_id
+            params.update(kwargs)
+
+            self._reset_modifiers()
+            return asyncio.create_task(
+                self._adapter.call_api(
+                    endpoint=endpoint,
+                    _account_id=self._account_id,
+                    **params,
+                )
+            )
+
         def Board(self, scope_or_content, content=None, content_type="text", **kwargs):
             """
             发布看板（终止方法）
@@ -332,11 +351,13 @@ class YunhuAdapter(sdk.BaseAdapter):
                - 指定了 To(target_type, target_id) -> 本地看板（/bot/board）
                - 未指定 To() -> 全局看板（/bot/board-all）
                - 可选链式修饰：.Expire(duration) 相对过期、.ExpireAt(timestamp) 绝对过期、.ForMember(member_id) 群成员看板
+               - 内容为空时自动转为撤销看板（等价于 DismissBoard）
 
                >>> await yunhu.Send.To("group", "123").Board("公告")
                >>> await yunhu.Send.To("group", "123").Expire(60).Board("60秒后过期", content_type="markdown")
                >>> await yunhu.Send.To("group", "123").ExpireAt(1785208268).Board("指定时间戳过期")
                >>> await yunhu.Send.To("group", "123").ForMember("uid").Board("仅你可见")
+               >>> await yunhu.Send.To("group", "123").Board("")        # 清空本地看板
                >>> await yunhu.Send.Board("全局公告")
 
             2. 旧式风格（兼容）：显式传入 scope
@@ -351,6 +372,10 @@ class YunhuAdapter(sdk.BaseAdapter):
                 is_local = bool(self._target_id and self._target_type)
 
             member_id = kwargs.pop("member_id", None) or self._board_member_id
+
+            # 内容为空 → 自动撤销看板
+            if not content:
+                return self._make_dismiss_task(is_local, member_id, kwargs)
 
             endpoint = "/bot/board" if is_local else "/bot/board-all"
             if "expire_time" in kwargs:
@@ -407,27 +432,7 @@ class YunhuAdapter(sdk.BaseAdapter):
                 is_local = bool(self._target_id and self._target_type)
 
             member_id = kwargs.pop("member_id", None) or self._board_member_id
-
-            endpoint = (
-                "/bot/board-dismiss" if is_local else "/bot/board-all-dismiss"
-            )
-
-            params = {}
-            if is_local:
-                params["chatId"] = self._target_id
-                params["chatType"] = self._target_type
-                if member_id is not None:
-                    params["memberId"] = member_id
-            params.update(kwargs)
-
-            self._reset_modifiers()
-            return asyncio.create_task(
-                self._adapter.call_api(
-                    endpoint=endpoint,
-                    _account_id=self._account_id,
-                    **params,
-                )
-            )
+            return self._make_dismiss_task(is_local, member_id, kwargs)
 
         def Kick(self, user_id: str):
             if self._target_type != "group":
