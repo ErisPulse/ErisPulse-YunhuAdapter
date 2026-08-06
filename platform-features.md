@@ -6,7 +6,7 @@ YunhuAdapter 是基于云湖协议构建的适配器，整合了所有云湖功�
 
 ## 文档信息
 
-- 对应模块版本: 4.2.0
+- 对应模块版本: 4.3.0
 - 维护者: ErisPulse
 
 ## 基本信息
@@ -81,6 +81,77 @@ result = await yunhu.Send.To("group", group_id).GetMessages(before=10)
 Board 作用域由 `To()` 自动推断：
 - 指定 `To(target_type, target_id)` → 本地看板（指定用户/群组）
 - 未指定 `To()` → 全局看板
+
+## 标准 API 动作（ApiDSL）
+
+除了 `Send` 链式发送，适配器还提供 `Api` 内部类，暴露 OneBot12 标准 API 动作与云湖平台扩展动作。所有方法返回标准响应格式。
+
+```python
+from ErisPulse.Core import adapter
+yunhu = adapter.get("yunhu")
+
+# 信息查询（通过公开 Web API，无需鉴权）
+result = await yunhu.Api.get_self_info()              # 机器人自身信息
+result = await yunhu.Api.get_user_info("7058262")     # 任意用户信息
+result = await yunhu.Api.get_group_info("635409929")  # 群信息
+
+# 文件操作
+result = await yunhu.Api.upload_file(type="path", name="a.png", path="./a.png")
+result = await yunhu.Api.get_file("https://chat-file.jwznb.com/xxx")
+
+# 撤回消息（需额外提供 chat_id + chat_type）
+await yunhu.Api.delete_message("msg_id", chat_id="123", chat_type="group")
+
+# 多账户：指定 Bot 账号
+info = await yunhu.Api.Using("bot1").get_self_info()
+```
+
+### 支持的标准动作
+
+| 方法 | 说明 | 数据来源 |
+|------|------|---------|
+| `get_self_info()` | 机器人自身信息 | 公开 Web API（bot-info） |
+| `get_user_info(user_id)` | 用户信息（任意用户可查） | 公开 Web API（user/homepage） |
+| `get_group_info(group_id)` | 群信息 | 公开 Web API（group-info） |
+| `upload_file(*, type, name, ...)` | 上传文件（自动判定 image/video/file） | Bot 开放 API |
+| `get_file(file_id)` | 获取文件（file_id 即 URL） | — |
+| `delete_message(message_id, *, chat_id, chat_type)` | 撤回消息 | Bot 开放 API（/bot/recall） |
+
+> **注意**：`get_self_info` / `get_user_info` / `get_group_info` 通过**非官方公开 Web API**（chat-web-go.jwzhd.com）实现，这些接口无需鉴权但非官方文档、可能随平台更新变动；失败时返回标准错误响应。
+
+### 不支持的标准动作
+
+以下标准动作云湖无对应 API，调用时返回 `retcode=10002`（不支持的操作）：
+- `get_friend_list`（Bot 开放 API 的"机器人用户列表"尚在待上线状态）
+- `get_group_list` / `get_group_member_info` / `get_group_member_list`
+- `set_group_name` / `leave_group`
+
+### 平台扩展动作
+
+通过 `Api.call("yunhu.xxx", **params)` 调用云湖特有动作（参数采用 OB12 风格命名，适配器自动翻译为云湖字段）：
+
+| 扩展动作 | 说明 | 等价 Send 方法 |
+|---------|------|---------------|
+| `yunhu.recall` | 撤回消息（msg_id, chat_id, chat_type） | `Send.To(...).Recall(msg_id)` |
+| `yunhu.kick` | 移除群成员（group_id, user_id） | `Send.To("group", g).Kick(uid)` |
+| `yunhu.ban` | 禁言（group_id, user_id, duration） | `Send.To("group", g).Ban(uid, duration)` |
+| `yunhu.unban` | 解除禁言（group_id, user_id） | `Send.To("group", g).Ban(uid, duration=0)` |
+| `yunhu.tag.create/edit/delete/list` | 群标签 CRUD（group_id, ...） | `Send.To("group", g).CreateTag(...)` 等 |
+| `yunhu.tag.relate` / `yunhu.tag.relate_cancel` | 给用户添加/移除标签 | `Send.To("group", g).AddUserTag(...)` 等 |
+| `yunhu.set_member_title` / `yunhu.unset_member_title` | **成员头衔语义别名**（标签≈头衔，内部映射到 tag.relate） | — |
+| `yunhu.msg_type_limit` | 群消息类型限制（group_id, type） | `Send.To("group", g).SetMsgTypeLimit(...)` |
+| `yunhu.get_messages` | 获取历史消息（chat_id, chat_type, message_id?, before?, after?） | `Send.To(...).GetMessages(...)` |
+| `yunhu.bot_info` | 公开 bot-info 查询（bot_id） | — |
+| `yunhu.user_homepage` | 公开用户主页查询（user_id） | — |
+
+```python
+# 平台扩展示例
+await yunhu.Api.call("yunhu.kick", group_id="123", user_id="456")
+await yunhu.Api.call("yunhu.set_member_title", group_id="123", user_id="456", title="VIP")
+result = await yunhu.Api.call("yunhu.get_messages", chat_id="123", chat_type="group", before=10)
+```
+
+> **标签与头衔**：云湖的"标签"语义等同 OneBot12 群成员 `title`。`yunhu.set_member_title` 是 `yunhu.tag.relate` 的原生语义别名，二者内部映射到同一端点。群消息事件中发送者角色由 `senderUserLevel` 映射到标准 `role` 字段（owner/admin/member）。
 
 ### 按钮参数说明
 

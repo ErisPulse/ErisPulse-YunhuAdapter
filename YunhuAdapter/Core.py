@@ -6,17 +6,16 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import aiohttp
 import filetype
 from ErisPulse import sdk
-from ErisPulse.Core import ClientWebSocket, client, router
+from ErisPulse.Core import BaseAdapter, ClientWebSocket, client, router
+from ErisPulse.Core.Bases import BaseConfig, BaseI18n, BotAccountConfig, I18nKey
 from ErisPulse.Core.Bases.errors import (
     ClientConnectionError,
     ClientError,
     ClientTimeoutError,
 )
 from ErisPulse.Core.Bases.websocket import WSMessage
-from ErisPulse.runtime.config_schema import BotAccountConfig
 
 
 def _mask_token(url: str) -> str:
@@ -27,6 +26,49 @@ def _mask_token(url: str) -> str:
 # 该群不包含任何机器人，因此请求始终被拒绝，不会产生实际副作用。
 PROBE_GROUP_ID = "112869497"
 
+# OneBot12 标准动作名：Yunhu 不支持的（调用时返回 retcode=10002）
+_UNSUPPORTED_STANDARD_ACTIONS = {
+    "get_friend_list",
+    "get_group_list",
+    "get_group_member_info",
+    "get_group_member_list",
+    "set_group_name",
+    "leave_group",
+}
+
+
+@dataclass
+class YunhuGlobalConfig(BaseConfig):
+    """云湖适配器全局配置（API 地址，一般无需修改）"""
+
+    base_url: str = field(
+        default="https://chat-go.jwzhd.com/open-apis/v1",
+        metadata={
+            "description": {"i18n": "yunhu.base_url", "default": "Bot 开放 API 地址"},
+            "required": False,
+            "ui": {"widget": "text", "group": "connection", "order": 1},
+        },
+    )
+    web_api_base_url: str = field(
+        default="https://chat-web-go.jwzhd.com",
+        metadata={
+            "description": {
+                "i18n": "yunhu.web_api_base_url",
+                "default": "公开 Web API 地址（非官方，用于信息查询）",
+            },
+            "required": False,
+            "ui": {"widget": "text", "group": "connection", "order": 2},
+        },
+    )
+    ws_base_url: str = field(
+        default="wss://ws.jwzhd.com/subscribe",
+        metadata={
+            "description": {"i18n": "yunhu.ws_base_url", "default": "WebSocket 订阅地址"},
+            "required": False,
+            "ui": {"widget": "text", "group": "connection", "order": 3},
+        },
+    )
+
 
 @dataclass
 class YunhuBotConfig(BotAccountConfig):
@@ -35,23 +77,24 @@ class YunhuBotConfig(BotAccountConfig):
     token: str = field(
         default="",
         metadata={
-            "description": "机器人Token",
+            "description": {"i18n": "yunhu.token", "default": "机器人 Token"},
             "required": True,
             "secret": True,
-            "webui": {"widget": "password", "group": "basic", "order": 2},
+            "ui": {"widget": "password", "group": "basic", "order": 2},
         },
     )
     mode: str = field(
         default="ws",
         metadata={
-            "description": "接收模式",
-            "webui": {
+            "description": {"i18n": "yunhu.mode", "default": "事件接收模式"},
+            "required": False,
+            "ui": {
                 "widget": "select",
                 "group": "connection",
                 "order": 3,
                 "options": [
-                    {"label": "WebSocket", "value": "ws"},
-                    {"label": "Webhook", "value": "webhook"},
+                    {"label": {"i18n": "yunhu.mode.ws", "default": "WebSocket"}, "value": "ws"},
+                    {"label": {"i18n": "yunhu.mode.webhook", "default": "Webhook"}, "value": "webhook"},
                 ],
             },
         },
@@ -59,24 +102,366 @@ class YunhuBotConfig(BotAccountConfig):
     webhook_path: str = field(
         default="/webhook",
         metadata={
-            "description": "Webhook路径（仅webhook模式）",
-            "webui": {"widget": "text", "group": "connection", "order": 4},
+            "description": {"i18n": "yunhu.webhook_path", "default": "Webhook 路径（仅 webhook 模式）"},
+            "required": False,
+            "ui": {"widget": "text", "group": "connection", "order": 4},
         },
     )
 
 
-class YunhuAdapter(sdk.BaseAdapter):
+# 分组显示名（WebUI 用）
+YunhuGlobalConfig._schema_meta = {
+    "group_labels": {
+        "connection": {"i18n": "yunhu.group.connection", "default": "连接设置"},
+    }
+}
+
+
+class YunhuAdapter(BaseAdapter):
     """
     云湖平台适配器实现
 
     {!--< tips >!--}
-    1. 使用统一适配器服务器系统管理Webhook路由
-    2. 提供完整的消息发送DSL接口
+    1. 使用统一适配器服务器系统管理 Webhook 路由
+    2. 提供完整的消息发送 DSL 接口与标准 Api 动作
     3. 使用 AccountConfigClass 声明式管理多账户配置
+    4. 标准 Api 动作（get_self_info/get_user_info/get_group_info 等）跨平台可用
     {!--< /tips >!--}
     """
 
+    ConfigClass = YunhuGlobalConfig
     AccountConfigClass = YunhuBotConfig
+
+    class I18nClass(BaseI18n):
+        """云湖适配器翻译键声明"""
+
+        base_url: I18nKey = I18nKey(
+            default="Bot Open API URL",
+            zh_CN="Bot 开放 API 地址",
+            en="Bot Open API URL",
+        )
+        web_api_base_url: I18nKey = I18nKey(
+            default="Public Web API URL (unofficial, for info queries)",
+            zh_CN="公开 Web API 地址（非官方，用于信息查询）",
+            en="Public Web API URL (unofficial, for info queries)",
+        )
+        ws_base_url: I18nKey = I18nKey(
+            default="WebSocket subscribe URL",
+            zh_CN="WebSocket 订阅地址",
+            en="WebSocket subscribe URL",
+        )
+        token: I18nKey = I18nKey(
+            default="Bot Token",
+            zh_CN="机器人 Token",
+            en="Bot Token",
+        )
+        mode: I18nKey = I18nKey(
+            default="Event receive mode",
+            zh_CN="事件接收模式",
+            en="Event receive mode",
+        )
+        mode_ws: I18nKey = I18nKey(
+            default="WebSocket",
+            zh_CN="WebSocket",
+            en="WebSocket",
+        )
+        mode_webhook: I18nKey = I18nKey(
+            default="Webhook",
+            zh_CN="Webhook",
+            en="Webhook",
+        )
+        webhook_path: I18nKey = I18nKey(
+            default="Webhook path (webhook mode only)",
+            zh_CN="Webhook 路径（仅 webhook 模式）",
+            en="Webhook path (webhook mode only)",
+        )
+        group_connection: I18nKey = I18nKey(
+            default="Connection",
+            zh_CN="连接设置",
+            en="Connection",
+        )
+
+    class EventMixin:
+        """
+        云湖平台事件扩展方法
+
+        注册到事件包装类后，可在事件处理器中直接调用：
+        ``event.get_sender_role()`` / ``event.get_button_value()`` 等。
+        所有方法均从 ``yunhu_raw`` / 标准字段安全读取，缺失时返回空值。
+        """
+
+        def get_raw_event(self) -> dict:
+            """获取云湖原始事件数据（yunhu_raw）"""
+            return self.get("yunhu_raw", {}) or {}
+
+        def get_sender_level(self) -> str:
+            """获取发送者在云湖的原生级别（owner/administrator/member/unknown）"""
+            raw = self.get_raw_event()
+            sender = raw.get("event", {}).get("sender", {}) if "event" in raw else {}
+            return sender.get("senderUserLevel", "") or self.get("yunhu_sender_level", "")
+
+        def get_sender_role(self) -> str:
+            """获取发送者的 OneBot12 标准 role（owner/admin/member）"""
+            return self.get("role", "") or "member"
+
+        def get_sender_title(self) -> str:
+            """
+            获取发送者头衔（云湖标签的语义映射）
+
+            云湖 bot 事件本身不携带成员标签；此方法预留为标准 title 字段访问器，
+            未来若事件/查询返回头衔数据会填充到 ``title`` 字段。
+            """
+            return self.get("title", "")
+
+        def get_sender_avatar(self) -> str:
+            """获取发送者头像 URL"""
+            if self.get("user_avatar"):
+                return self.get("user_avatar", "")
+            raw = self.get_raw_event()
+            sender = raw.get("event", {}).get("sender", {}) if "event" in raw else {}
+            return sender.get("senderAvatarUrl", "")
+
+        def get_command(self) -> dict:
+            """获取指令数据（仅指令消息事件，yunhu_command）"""
+            return self.get("yunhu_command", {}) or {}
+
+        def get_button_value(self) -> str:
+            """获取按钮点击事件的 value（yunhu_button.value）"""
+            return self.get("yunhu_button", {}).get("value", "")
+
+        def get_a2ui_action(self) -> str:
+            """获取 A2UI 按钮事件的 actionName（yunhu_a2ui.action_name）"""
+            return self.get("yunhu_a2ui", {}).get("action_name", "")
+
+        def get_a2ui_form_context(self) -> dict:
+            """获取 A2UI 按钮事件的表单上下文（yunhu_a2ui.form_context）"""
+            return self.get("yunhu_a2ui", {}).get("form_context", {}) or {}
+
+        def get_menu_id(self) -> str:
+            """获取快捷菜单事件 ID（yunhu_menu.id）"""
+            return self.get("yunhu_menu", {}).get("id", "")
+
+        def get_setting(self) -> dict:
+            """获取机器人设置事件的设置数据（yunhu_setting）"""
+            return self.get("yunhu_setting", {}) or {}
+
+        def is_command_message(self) -> bool:
+            """是否为指令消息"""
+            return bool(self.get("yunhu_command"))
+
+        def is_button_click(self) -> bool:
+            """是否为按钮点击事件"""
+            return self.get("detail_type") == "yunhu_button_click"
+
+        def is_a2ui_button(self) -> bool:
+            """是否为 A2UI 按钮事件"""
+            return self.get("detail_type") == "yunhu_a2ui_button"
+
+    class Api(BaseAdapter.Api):
+        """
+        云湖标准 API 动作实现（ApiDSL）
+
+        {!--< tips >!--}
+        1. get_self_info / get_user_info / get_group_info 通过非官方公开 Web API 实现（chat-web-go.jwzhd.com）
+        2. upload_file 自动判定 image/video/file 类别上传到对应端点
+        3. delete_message 需额外提供 chat_id + chat_type（云湖 /bot/recall 要求）
+        4. 平台扩展动作通过 call("yunhu.xxx", ...) 调用
+        5. 不支持的标准动作返回 retcode=10002
+        {!--< /tips >!--}
+        """
+
+        async def _web_request(
+            self, path: str, payload: Optional[dict] = None, method: str = "POST"
+        ) -> dict:
+            """
+            调用非官方公开 Web API（chat-web-go.jwzhd.com）
+
+            始终返回原始 {code, msg, data} 结构；异常时返回 {"code": -1, "msg": ...}，
+            由调用方统一标准化。
+
+            :param path: API 路径（如 "/v1/group/group-info"）
+            :param payload: 请求体（GET 时作为 query）
+            """
+            base = self._adapter.cfg.web_api_base_url.rstrip("/")
+            url = f"{base}{path}"
+            try:
+                if method.upper() == "GET":
+                    resp = await client.get(url, params=payload or {})
+                else:
+                    resp = await client.post(url, json=payload or {})
+                return await resp.json()
+            except ClientTimeoutError:
+                return {"code": -1, "msg": f"Web API 请求超时: {path}"}
+            except ClientError as e:
+                return {"code": -1, "msg": f"Web API 网络错误: {e}"}
+            except Exception as e:
+                return {"code": -1, "msg": f"Web API 请求异常: {e}"}
+
+        async def get_self_info(self) -> dict:
+            """获取机器人自身信息（通过公开 bot-info 接口）"""
+            bot_name, _ = self._adapter._resolve_account(self._account_id)
+            bot_id = self._adapter._bot_ids.get(bot_name, "")
+            if not bot_id:
+                return self._adapter.make_error(
+                    retcode=35000, message="机器人 ID 尚未探测到"
+                )
+            raw = await self._web_request(
+                "/v1/bot/bot-info", {"botId": str(bot_id)}
+            )
+            if raw.get("code") != 1:
+                return self._adapter.make_error(
+                    retcode=34001, message=raw.get("msg", "获取机器人信息失败"), raw=raw
+                )
+            bot = raw.get("data", {}).get("bot", {})
+            user_id = str(bot.get("botId", bot_id))
+            user_name = bot.get("nickname", "")
+            data = {
+                "user_id": user_id,
+                "user_name": user_name,
+                "user_displayname": user_name,
+                "user_avatar": bot.get("avatarUrl", ""),
+                "introduction": bot.get("introduction", ""),
+                "headcount": bot.get("headcount", 0),
+                "private": bot.get("private", 0),
+            }
+            self._adapter.logger.info(
+                f"Api.get_self_info: bot_id={user_id}, nickname={user_name}, "
+                f"headcount={data['headcount']}"
+            )
+            return self._adapter.make_response(data=data, raw=raw)
+
+        async def get_user_info(self, user_id: str) -> dict:
+            """获取用户信息（通过公开 user/homepage 接口，任意用户可查）"""
+            raw = await self._web_request(
+                "/v1/user/homepage", {"userId": str(user_id)}, method="GET"
+            )
+            if raw.get("code") != 1:
+                return self._adapter.make_error(
+                    retcode=34001, message=raw.get("msg", "获取用户信息失败"), raw=raw
+                )
+            u = raw.get("data", {}).get("user", {})
+            data = {
+                "user_id": str(u.get("userId", user_id)),
+                "user_name": u.get("nickname", ""),
+                "user_displayname": u.get("nickname", ""),
+                "user_remark": "",
+                "user_avatar": u.get("avatarUrl", ""),
+                "register_time": u.get("registerTime", 0),
+                "is_vip": u.get("isVip", 0),
+            }
+            self._adapter.logger.info(
+                f"Api.get_user_info: user_id={data['user_id']}, "
+                f"nickname={data['user_name']}"
+            )
+            return self._adapter.make_response(data=data, raw=raw)
+
+        async def get_group_info(self, group_id: str) -> dict:
+            """获取群信息（通过公开 group-info 接口）"""
+            raw = await self._web_request(
+                "/v1/group/group-info", {"groupId": str(group_id)}
+            )
+            if raw.get("code") != 1:
+                return self._adapter.make_error(
+                    retcode=34001, message=raw.get("msg", "获取群信息失败"), raw=raw
+                )
+            g = raw.get("data", {}).get("group", {})
+            data = {
+                "group_id": str(g.get("groupId", group_id)),
+                "group_name": g.get("name", ""),
+                "group_avatar": g.get("avatarUrl", ""),
+                "group_introduction": g.get("introduction", ""),
+                "group_member_count": g.get("headcount", 0),
+                "group_create_by": g.get("createBy", ""),
+            }
+            self._adapter.logger.info(
+                f"Api.get_group_info: group_id={data['group_id']}, "
+                f"name={data['group_name']}, member_count={data['group_member_count']}"
+            )
+            return self._adapter.make_response(data=data, raw=raw)
+
+        async def upload_file(
+            self,
+            *,
+            type: str,
+            name: str,
+            url: str | None = None,
+            path: str | None = None,
+            data: bytes | None = None,
+            headers: dict[str, str] | None = None,
+            sha256: str | None = None,
+        ) -> dict:
+            """
+            上传文件（自动判定 image/video/file 类别）
+
+            :param type: 来源类型（url/path/data）
+            :param name: 文件名（用于类别判定，如 "a.jpg"）
+            """
+            adapter = self._adapter
+            try:
+                file_bytes, _ = await adapter._read_upload_bytes(
+                    type=type, url=url, path=path, data=data, headers=headers
+                )
+            except Exception as e:
+                return adapter.make_error(retcode=10003, message=f"读取文件失败: {e}")
+
+            category = adapter._detect_category(name, file_bytes)
+            upload_endpoint_map = {
+                "image": "/image/upload",
+                "video": "/video/upload",
+                "file": "/file/upload",
+            }
+            upload_endpoint = upload_endpoint_map[category]
+
+            # 构建完整文件名（补全扩展名）
+            ext = adapter._detect_extension(file_bytes, name)
+            filename = adapter._build_upload_filename(name, category, ext)
+
+            bot_name, bot = adapter._resolve_account(self._account_id)
+            upload_url = f"{adapter.base_url}{upload_endpoint}?token={bot.token}"
+
+            try:
+                resp_json = await adapter._perform_upload(
+                    upload_url, category, file_bytes, filename
+                )
+            except Exception as e:
+                return adapter.make_error(retcode=34000, message=f"上传失败: {e}")
+
+            try:
+                file_id = adapter._extract_upload_key(resp_json, category)
+            except ValueError as e:
+                return adapter.make_error(retcode=34000, message=str(e), raw=resp_json)
+
+            return adapter.make_response(
+                data={"file_id": file_id, "name": name}, raw=resp_json
+            )
+
+        async def get_file(self, file_id: str, type: str = "url") -> dict:
+            """获取文件（云湖 file_id 本身即下载 URL）"""
+            return self._adapter.make_response(
+                data={"name": "", "url": str(file_id)}
+            )
+
+        async def delete_message(
+            self, message_id: str, *, chat_id: str = None, chat_type: str = None
+        ) -> dict:
+            """
+            撤回消息
+
+            云湖 /bot/recall 必须提供 chat_id + chat_type。
+            缺省时返回参数错误（retcode=10003）。
+            """
+            if not chat_id or not chat_type:
+                return self._adapter.make_error(
+                    retcode=10003,
+                    message="云湖撤回消息需要 chat_id 与 chat_type（如 chat_type='group'/'user'）",
+                )
+            return await self._adapter.call_api(
+                "/bot/recall",
+                _account_id=self._account_id,
+                msgId=str(message_id),
+                chatId=str(chat_id),
+                chatType=str(chat_type),
+            )
 
     class Send(sdk.BaseAdapter.Send):
         """
@@ -880,16 +1265,14 @@ class YunhuAdapter(sdk.BaseAdapter):
             )
 
         def _detect_document(self, sample_bytes):
-            office_signatures = {
-                b"PK\x03\x04\x14\x00\x06\x00": "docx",
-                b"PK\x03\x04\x14\x00\x00\x08": "xlsx",
-                b"PK\x03\x04\x14\x00\x00\x06": "pptx",
-            }
-
-            for signature, extension in office_signatures.items():
-                if sample_bytes.startswith(signature):
-                    return extension
-            return None
+            """（已迁移至 YunhuAdapter._detect_extension）保留以兼容旧调用"""
+            return self._adapter._OFFICE_SIGNATURES.get(
+                next(
+                    (sig for sig in self._adapter._OFFICE_SIGNATURES if sample_bytes.startswith(sig)),
+                    b"",
+                ),
+                None,
+            )
 
         async def _download_file_from_url(
             self, url: str, max_size: int = 100 * 1024 * 1024
@@ -920,18 +1303,17 @@ class YunhuAdapter(sdk.BaseAdapter):
                         )
                         return None, None
 
-                file_buffer = io.BytesIO()
-                downloaded_size = 0
+                # sdk.client 在返回前已 eager-read 缓冲整个响应体，
+                # 直接读取内存中的 bytes，避免流式读取连接被关闭的问题。
+                file_data = await resp.read()
+                downloaded_size = len(file_data)
+                if downloaded_size > max_size:
+                    self._adapter.logger.warning(
+                        f"下载文件过大: {downloaded_size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)"
+                    )
+                    return None, None
 
-                async for chunk in resp.raw.content.iter_chunked(1048576):
-                    downloaded_size += len(chunk)
-                    if downloaded_size > max_size:
-                        self._adapter.logger.warning(
-                            f"下载文件过大: {downloaded_size / 1024 / 1024:.2f}MB (限制: {max_size / 1024 / 1024:.0f}MB)"
-                        )
-                        return None, None
-                    file_buffer.write(chunk)
-
+                file_buffer = io.BytesIO(file_data)
                 file_buffer.seek(0)
 
                 self._adapter.logger.debug(
@@ -980,35 +1362,37 @@ class YunhuAdapter(sdk.BaseAdapter):
                 self._adapter.logger.error(f"读取文件失败: {file_path}, 错误: {str(e)}")
                 return None, None
 
+        async def _send_file_fail_text(self, subject: str, reason: str, kwargs: dict):
+            """上传失败时向目标发送文本说明消息"""
+            error_msg = f"[文件发送失败] 无法发送文件: {subject}\n原因: {reason}"
+            return await self._adapter.call_api(
+                endpoint="/bot/send",
+                _account_id=self._account_id,
+                recvId=self._target_id,
+                recvType=self._target_type,
+                contentType="text",
+                content={"text": error_msg},
+                parentId=kwargs.get("parent_id", ""),
+            )
+
         async def _upload_file_and_call_api(
             self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs
         ):
             bot_name, bot = self._adapter._resolve_account(self._account_id)
 
+            # 1. 将 file 归一化为 bytes（支持 URL / 本地路径 / bytes / 文件对象 / 异步生成器）
             if isinstance(file, str) and (
                 file.startswith("http://") or file.startswith("https://")
             ):
                 self._adapter.logger.info(f"检测到URL，开始下载: {file}")
-                file_data, downloaded_filename = await self._download_file_from_url(
-                    file
-                )
-
-                if file_data is None:
-                    error_msg = f"[文件发送失败] 无法发送文件: {file}\n原因: 文件过大(超过100MB)或下载失败"
-                    return await self._adapter.call_api(
-                        endpoint="/bot/send",
-                        _account_id=self._account_id,
-                        recvId=self._target_id,
-                        recvType=self._target_type,
-                        contentType="text",
-                        content={"text": error_msg},
-                        parentId=kwargs.get("parent_id", ""),
+                file_buffer, downloaded_filename = await self._download_file_from_url(file)
+                if file_buffer is None:
+                    return await self._send_file_fail_text(
+                        file, "文件过大(超过100MB)或下载失败", kwargs
                     )
-
                 if file_name is None and downloaded_filename:
                     file_name = downloaded_filename
-
-                file = file_data
+                file_bytes = file_buffer.getvalue()
 
             elif isinstance(file, str):
                 import os
@@ -1016,176 +1400,85 @@ class YunhuAdapter(sdk.BaseAdapter):
                 if os.path.exists(file) and os.path.isfile(file):
                     self._adapter.logger.info(f"检测到本地文件路径，开始读取: {file}")
                     file_data, local_filename = self._read_local_file(file)
-
                     if file_data is None:
-                        error_msg = f"[文件发送失败] 无法发送文件: {file}\n原因: 文件不存在、过大或读取失败"
-                        return await self._adapter.call_api(
-                            endpoint="/bot/send",
-                            _account_id=self._account_id,
-                            recvId=self._target_id,
-                            recvType=self._target_type,
-                            contentType="text",
-                            content={"text": error_msg},
-                            parentId=kwargs.get("parent_id", ""),
+                        return await self._send_file_fail_text(
+                            file, "文件不存在、过大或读取失败", kwargs
                         )
-
                     if file_name is None and local_filename:
                         file_name = local_filename
+                    file_bytes = file_data
+                else:
+                    return await self._send_file_fail_text(file, "文件路径不存在", kwargs)
 
-                    file = file_data
+            elif isinstance(file, (bytes, bytearray)):
+                file_bytes = bytes(file)
 
-            url = f"{self._adapter.base_url}{upload_endpoint}?token={bot.token}"
-
-            import aiohttp
-
-            data = aiohttp.FormData(quote_fields=False)
-
-            if kwargs.get("stream", False):
-                if not hasattr(file, "__aiter__"):
-                    raise ValueError("stream=True时，file参数必须是异步生成器")
-
-                temp_file = io.BytesIO()
+            elif hasattr(file, "__aiter__"):
+                # 异步生成器（流式）
+                temp_buffer = io.BytesIO()
                 async for chunk in file:
-                    temp_file.write(chunk)
-                temp_file.seek(0)
-                file_data = temp_file
+                    temp_buffer.write(chunk)
+                file_bytes = temp_buffer.getvalue()
+
+            elif hasattr(file, "read") and callable(file.read):
+                # BytesIO / 文件对象
+                file_bytes = file.read()
             else:
-                if isinstance(file, bytes):
-                    file_data = io.BytesIO(file)
-                elif isinstance(file, io.BytesIO):
-                    file_data = file
-                else:
-                    file_data = io.BytesIO(file)
+                raise ValueError("无法识别的文件类型")
 
-            file_info = None
-            file_extension = None
-
-            try:
-                if hasattr(file_data, "seek"):
-                    file_data.seek(0)
-                    sample = file_data.read(1024)
-                    file_data.seek(0)
-
-                    file_info = filetype.guess(sample)
-
-                    if file_info and file_info.mime == "application/zip":
-                        office_extension = self._detect_document(sample)
-                        if office_extension:
-                            file_extension = office_extension
-                    elif file_info:
-                        file_extension = file_info.extension
-            except Exception as e:
-                self._adapter.logger.warning(f"文件类型检测失败: {str(e)}")
-
-            if file_name is None:
-                if file_extension:
-                    upload_filename = f"{content_type}.{file_extension}"
-                else:
-                    upload_filename = f"{content_type}.bin"
-            else:
-                if file_extension and "." not in file_name:
-                    upload_filename = f"{file_name}.{file_extension}"
-                else:
-                    upload_filename = file_name
-
-            self._adapter.logger.debug(
-                f"Bot {bot_name} (bot_id: {self._adapter._bot_ids.get(bot_name, '')}) 上传文件: {upload_filename}"
-            )
-            data.add_field(
-                name=content_type,
-                value=file_data,
-                filename=upload_filename,
+            # 2. 类型检测 + 构建上传文件名
+            ext = self._adapter._detect_extension(file_bytes, file_name)
+            upload_filename = self._adapter._build_upload_filename(
+                file_name, content_type, ext
             )
 
+            # 3. 执行上传
+            upload_url = f"{self._adapter.base_url}{upload_endpoint}?token={bot.token}"
             try:
-                resp = await client.post(url, data=data, timeout=300)
-
-                if resp.status == 413:
-                    error_msg = f"[文件发送失败] 文件过大: {upload_filename}\n原因: 超过云湖服务器限制"
-                    return await self._adapter.call_api(
-                        endpoint="/bot/send",
-                        _account_id=self._account_id,
-                        recvId=self._target_id,
-                        recvType=self._target_type,
-                        contentType="text",
-                        content={"text": error_msg},
-                        parentId=kwargs.get("parent_id", ""),
-                    )
-
-                try:
-                    upload_res = await resp.json()
-                except (json.JSONDecodeError, ValueError) as e:
-                    error_text = (await resp.text())[:500]
-                    self._adapter.logger.error(f"上传响应非JSON格式: {error_text}")
-                    error_msg = f"[文件发送失败] 上传失败: {upload_filename}\n原因: 服务器返回错误 (状态码: {resp.status})"
-                    return await self._adapter.call_api(
-                        endpoint="/bot/send",
-                        _account_id=self._account_id,
-                        recvId=self._target_id,
-                        recvType=self._target_type,
-                        contentType="text",
-                        content={"text": error_msg},
-                        parentId=kwargs.get("parent_id", ""),
-                    )
-
-                self._adapter.logger.debug(f"上传响应: {upload_res}")
-
-                if upload_res.get("code") != 1:
-                    raise ValueError(f"文件上传失败: {upload_res}")
-
-                key_map = {"image": "imageKey", "video": "videoKey", "file": "fileKey"}
-
-                key_name = key_map.get(content_type, "fileKey")
-                if "data" not in upload_res or key_name not in upload_res["data"]:
-                    raise ValueError("上传API返回的数据格式不正确")
-
-            except ClientTimeoutError:
-                self._adapter.logger.error(f"文件上传超时: {_mask_token(url)}")
-                error_msg = f"[文件发送失败] 上传超时: {upload_filename}"
-                return await self._adapter.call_api(
-                    endpoint="/bot/send",
-                    _account_id=self._account_id,
-                    recvId=self._target_id,
-                    recvType=self._target_type,
-                    contentType="text",
-                    content={"text": error_msg},
-                    parentId=kwargs.get("parent_id", ""),
+                upload_res = await self._adapter._perform_upload(
+                    upload_url, content_type, file_bytes, upload_filename
                 )
-            except ClientError as e:
+            except ValueError as e:
+                self._adapter.logger.error(f"文件上传被拒绝: {_mask_token(upload_url)}: {e}")
+                return await self._send_file_fail_text(upload_filename, str(e), kwargs)
+            except (ClientTimeoutError, ClientError) as e:
                 self._adapter.logger.error(
-                    f"文件上传失败: {_mask_token(url)}, 错误: {str(e)}"
+                    f"文件上传失败: {_mask_token(upload_url)}, 错误: {str(e)}"
                 )
-                error_msg = (
-                    f"[文件发送失败] 上传失败: {upload_filename}\n原因: 网络错误"
-                )
-                return await self._adapter.call_api(
-                    endpoint="/bot/send",
-                    _account_id=self._account_id,
-                    recvId=self._target_id,
-                    recvType=self._target_type,
-                    contentType="text",
-                    content={"text": error_msg},
-                    parentId=kwargs.get("parent_id", ""),
-                )
+                return await self._send_file_fail_text(upload_filename, "网络错误或上传超时", kwargs)
             except Exception as e:
-                if isinstance(e, (ValueError,)):
-                    raise
                 self._adapter.logger.error(
-                    f"文件上传异常: {_mask_token(url)}, 错误: {str(e)}"
+                    f"文件上传异常: {_mask_token(upload_url)}, 错误: {str(e)}"
                 )
                 raise
 
+            # 4. 提取媒体 key 并调用发送接口
+            key_name = {"image": "imageKey", "video": "videoKey", "file": "fileKey"}.get(
+                content_type, "fileKey"
+            )
+            try:
+                media_value = self._adapter._extract_upload_key(upload_res, content_type)
+            except ValueError as e:
+                self._adapter.logger.error(f"上传响应异常: {e}")
+                return await self._send_file_fail_text(upload_filename, str(e), kwargs)
+
+            return await self._send_media_payload(
+                endpoint, key_name, media_value, content_type, kwargs
+            )
+
+        async def _send_media_payload(
+            self, endpoint, key_name, media_value, content_type, kwargs
+        ):
+            """构造媒体发送 payload 并调用发送接口"""
             payload = {
                 "recvId": self._target_id,
                 "recvType": self._target_type,
                 "contentType": content_type,
-                "content": {key_name: upload_res["data"][key_name]},
+                "content": {key_name: media_value},
                 "parentId": kwargs.get("parent_id", ""),
             }
-
             if "buttons" in kwargs:
                 payload["content"]["buttons"] = kwargs["buttons"]
-
             return await self._adapter.call_api(
                 endpoint, _account_id=self._account_id, **payload
             )
@@ -1278,8 +1571,11 @@ class YunhuAdapter(sdk.BaseAdapter):
         super().__init__(sdk_instance)
 
         self.adapter = sdk.adapter
-        self.base_url = "https://chat-go.jwzhd.com/open-apis/v1"
-        self.ws_base_url = "wss://ws.jwzhd.com/subscribe"
+        # 从全局配置读取 API 地址（默认值见 YunhuGlobalConfig）
+        cfg = self.cfg
+        self.base_url = cfg.base_url
+        self.web_api_base_url = cfg.web_api_base_url
+        self.ws_base_url = cfg.ws_base_url
         self._ws_tasks: Dict[str, asyncio.Task] = {}
         self._ws_connections: Dict[str, ClientWebSocket] = {}
         self._bot_ids: Dict[str, str] = {}
@@ -1293,6 +1589,175 @@ class YunhuAdapter(sdk.BaseAdapter):
         convert = YunhuConverter()
         return convert.convert
 
+    def on_config_update(self, old_config, new_config):
+        """配置热更新：API 地址变更时同步实例属性"""
+        if new_config is None:
+            return
+        self.base_url = new_config.base_url
+        self.web_api_base_url = new_config.web_api_base_url
+        self.ws_base_url = new_config.ws_base_url
+        if old_config and (
+            old_config.base_url != new_config.base_url
+            or old_config.ws_base_url != new_config.ws_base_url
+        ):
+            self.logger.info("API 地址配置已更新，下次连接生效")
+
+    # ==================== 文件上传辅助（供 Api.upload_file 使用） ====================
+
+    async def _read_upload_bytes(
+        self,
+        *,
+        type: str,
+        url: str | None = None,
+        path: str | None = None,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[bytes, str]:
+        """
+        按来源读取文件为 bytes
+
+        :return: (文件字节数据, 文件名)
+        """
+        if type == "data":
+            if data is None:
+                raise ValueError("type=data 时必须提供 data")
+            return data, ""
+
+        if type == "path":
+            if not path:
+                raise ValueError("type=path 时必须提供 path")
+            import os
+
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"文件不存在: {path}")
+            with open(path, "rb") as f:
+                return f.read(), os.path.basename(path)
+
+        if type == "url":
+            if not url:
+                raise ValueError("type=url 时必须提供 url")
+            from urllib.parse import urlparse, unquote
+
+            resp = await client.get(url, headers=headers or {}, timeout=300)
+            # sdk.client 返回前已 eager-read 缓冲整个响应体，直接读取内存 bytes
+            file_data = await resp.read()
+            filename = unquote(urlparse(url).path.split("/")[-1]) or ""
+            return file_data, filename
+
+        raise ValueError(f"不支持的 type: {type}")
+
+    @staticmethod
+    def _detect_category(filename: str, file_bytes: bytes) -> str:
+        """
+        自动判定上传类别：image / video / file
+
+        优先用 filetype 探测 MIME，其次用文件名后缀兜底。
+        """
+        mime = ""
+        try:
+            sample = file_bytes[:1024] if file_bytes else b""
+            info = filetype.guess(sample) if sample else None
+            if info:
+                mime = info.mime
+        except Exception:
+            pass
+
+        if mime.startswith("image/"):
+            return "image"
+        if mime.startswith("video/"):
+            return "video"
+
+        # 后缀兜底
+        lower = (filename or "").lower()
+        image_exts = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico")
+        video_exts = (".mp4", ".mkv", ".mov", ".avi", ".flv", ".wmv", ".webm")
+        if lower.endswith(image_exts):
+            return "image"
+        if lower.endswith(video_exts):
+            return "video"
+        return "file"
+
+    # Office 文档魔数签名（filetype 会把 docx/xlsx/pptx 识别为 zip）
+    _OFFICE_SIGNATURES = {
+        b"PK\x03\x04\x14\x00\x06\x00": "docx",
+        b"PK\x03\x04\x14\x00\x00\x08": "xlsx",
+        b"PK\x03\x04\x14\x00\x00\x06": "pptx",
+    }
+
+    @classmethod
+    def _detect_extension(cls, file_bytes: bytes, filename: str = "") -> Optional[str]:
+        """
+        检测文件扩展名（含 Office 文档特殊处理）。
+
+        优先 filetype 探测，其次文件名后缀兜底。
+        """
+        try:
+            sample = file_bytes[:1024] if file_bytes else b""
+            info = filetype.guess(sample) if sample else None
+            if info:
+                if info.mime == "application/zip":
+                    for signature, ext in cls._OFFICE_SIGNATURES.items():
+                        if sample.startswith(signature):
+                            return ext
+                return info.extension
+        except Exception:
+            pass
+        lower = (filename or "").lower()
+        if "." in lower:
+            return lower.rsplit(".", 1)[-1] or None
+        return None
+
+    @staticmethod
+    def _build_upload_filename(
+        file_name: Optional[str], content_type: str, file_extension: Optional[str]
+    ) -> str:
+        """构建上传文件名（补全扩展名，便于服务端识别）"""
+        if not file_name:
+            return f"{content_type}.{file_extension}" if file_extension else f"{content_type}.bin"
+        if file_extension and "." not in file_name:
+            return f"{file_name}.{file_extension}"
+        return file_name
+
+    async def _perform_upload(
+        self, upload_url: str, content_type: str, file_bytes: bytes, filename: str
+    ) -> dict:
+        """
+        执行 multipart/form-data 文件上传，返回云湖上传响应 {code, data, msg}。
+
+        :raises ValueError: 上传被服务器拒绝（413 过大 / 非 JSON 响应 / code != 1）
+        :raises ClientError / ClientTimeoutError: 网络层错误（由调用方决定处理策略）
+        """
+        import aiohttp  # 仅用于 FormData（ErisPulse 已内置 aiohttp）
+
+        form = aiohttp.FormData(quote_fields=False)
+        form.add_field(
+            name=content_type,
+            value=io.BytesIO(file_bytes),
+            filename=filename or f"{content_type}.bin",
+        )
+        resp = await client.post(upload_url, data=form, timeout=300)
+        if resp.status == 413:
+            raise ValueError("文件过大，超过云湖服务器限制")
+        try:
+            upload_res = await resp.json()
+        except (json.JSONDecodeError, ValueError):
+            error_text = (await resp.text())[:500]
+            raise ValueError(f"服务器返回错误 (状态码: {resp.status}): {error_text}")
+        if upload_res.get("code") != 1:
+            raise ValueError(f"文件上传失败: {upload_res}")
+        return upload_res
+
+    @staticmethod
+    def _extract_upload_key(upload_res: dict, content_type: str) -> str:
+        """从上传响应中提取媒体 key（imageKey / videoKey / fileKey）"""
+        key_map = {"image": "imageKey", "video": "videoKey", "file": "fileKey"}
+        key_name = key_map.get(content_type, "fileKey")
+        data = upload_res.get("data", {})
+        if key_name not in data:
+            raise ValueError(f"上传API返回的数据格式不正确，缺少 {key_name}")
+        return data[key_name]
+
+
     async def _net_request(
         self,
         method: str,
@@ -1302,6 +1767,8 @@ class YunhuAdapter(sdk.BaseAdapter):
         bot_token: str = None,
         max_retries: int = 2,
     ) -> Dict:
+        import aiohttp  # 仅用于捕获底层异常（ErisPulse 已内置 aiohttp）
+
         token = bot_token if bot_token else ""
         url = f"{self.base_url}{endpoint}?token={token}"
 
@@ -1435,8 +1902,114 @@ class YunhuAdapter(sdk.BaseAdapter):
 
         return resp
 
+    # yunhu.* 扩展动作 → 平台端点映射表
+    # 值为 (endpoint, [(ob12_param, yunhu_param), ...]) ；ob12_param 缺省时原样保留
+    _EXTENSION_MAP: Dict[str, tuple] = {
+        "yunhu.recall": ("/bot/recall", [("msg_id", "msgId"), ("chat_id", "chatId"), ("chat_type", "chatType")]),
+        "yunhu.kick": ("/group/remove-member", [("user_id", "userId"), ("group_id", "groupId")]),
+        "yunhu.ban": ("/group/gag-member", [("user_id", "userId"), ("group_id", "groupId"), ("duration", "gag")]),
+        "yunhu.unban": ("/group/gag-member", [("user_id", "userId"), ("group_id", "groupId")]),
+        "yunhu.tag.create": ("/group/tag/create", [("group_id", "groupId"), ("new_tag", "newTag")]),
+        "yunhu.tag.edit": ("/group/tag/edit", [("group_id", "groupId"), ("new_tag", "newTag")]),
+        "yunhu.tag.delete": ("/group/tag/delete", [("group_id", "groupId")]),
+        "yunhu.tag.list": ("/group/tag/list", [("group_id", "groupId")]),
+        # 成员头衔语义别名（标签 ≈ 头衔）→ 映射到 user-relate
+        "yunhu.set_member_title": ("/group/tag/user-relate", [("user_id", "userId"), ("title", "tag"), ("group_id", "groupId")]),
+        "yunhu.unset_member_title": ("/group/tag/user-relate-cancel", [("user_id", "userId"), ("title", "tag"), ("group_id", "groupId")]),
+        "yunhu.tag.relate": ("/group/tag/user-relate", [("user_id", "userId"), ("group_id", "groupId")]),
+        "yunhu.tag.relate_cancel": ("/group/tag/user-relate-cancel", [("user_id", "userId"), ("group_id", "groupId")]),
+        "yunhu.msg_type_limit": ("/group/msg-type-limit", [("group_id", "groupId")]),
+    }
+
+    def _map_extension_action(self, endpoint: str, params: dict) -> Optional[str]:
+        """
+        将 yunhu.* 扩展动作名映射为平台端点，并翻译参数键名。
+
+        :return: 映射后的端点；非扩展动作返回 None
+        """
+        if endpoint not in self._EXTENSION_MAP:
+            return None
+
+        platform_endpoint, key_map = self._EXTENSION_MAP[endpoint]
+
+        # yunhu.unban: 设置 gag=0（解除禁言）
+        if endpoint == "yunhu.unban":
+            params.setdefault("gag", 0)
+
+        # 翻译参数键名（OB12 风格 → 云湖风格）
+        if key_map:
+            for ob12_key, yunhu_key in key_map:
+                if ob12_key in params:
+                    params[yunhu_key] = params.pop(ob12_key)
+
+        return platform_endpoint
+
+    def _standardize_web_result(self, raw) -> dict:
+        """
+        将公开 Web API 的原始响应（{code, msg, data}）标准化为标准响应格式。
+
+        已标准化（含 status 键）的响应原样返回。
+        """
+        if isinstance(raw, dict) and raw.get("status") in ("ok", "failed"):
+            return raw
+        if isinstance(raw, dict) and raw.get("code") == 1:
+            self.logger.debug(f"Web API 查询成功: {json.dumps(raw.get('data'), ensure_ascii=False)[:300]}")
+            return self.make_response(data=raw.get("data"), raw=raw)
+        self.logger.warning(f"Web API 查询失败: {raw.get('msg', '未知错误') if isinstance(raw, dict) else raw}")
+        return self.make_error(
+            retcode=34001,
+            message=raw.get("msg", "Web API 请求失败") if isinstance(raw, dict) else str(raw),
+            raw=raw,
+        )
+
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
         bot_name, bot = self._resolve_account(_account_id)
+
+        # 从 ApiDSL._merge_context 等来源可能带入 account_id，需从业务参数中剔除
+        params.pop("account_id", None)
+
+        # 1. 不支持的 OneBot12 标准动作 → retcode=10002
+        if endpoint in _UNSUPPORTED_STANDARD_ACTIONS:
+            return self.make_error(
+                retcode=10002,
+                message=f"云湖适配器不支持的标准动作: {endpoint}",
+            )
+
+        # 2. 特殊扩展动作（非 POST / 走 web API）
+        if endpoint == "yunhu.get_messages":
+            # OB12 风格参数 → 云湖 hyphen 风格查询参数
+            msg_params = {}
+            for k, v in params.items():
+                if k == "chat_id":
+                    msg_params["chat-id"] = str(v)
+                elif k == "chat_type":
+                    msg_params["chat-type"] = str(v)
+                elif k == "message_id":
+                    msg_params["message-id"] = str(v)
+                else:
+                    msg_params[k] = v
+            return await self.get_messages(_account_id=_account_id, **msg_params)
+        if endpoint == "yunhu.bot_info":
+            raw = await self.Api._web_request(
+                "/v1/bot/bot-info", {"botId": str(params.get("bot_id", ""))}
+            )
+            resp = self._standardize_web_result(raw)
+            resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+            return resp
+        if endpoint == "yunhu.user_homepage":
+            raw = await self.Api._web_request(
+                "/v1/user/homepage",
+                {"userId": str(params.get("user_id", ""))},
+                method="GET",
+            )
+            resp = self._standardize_web_result(raw)
+            resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+            return resp
+
+        # 3. yunhu.* 平台扩展动作 → 路由到对应 POST 端点
+        mapped_endpoint = self._map_extension_action(endpoint, params)
+        if mapped_endpoint is not None:
+            endpoint = mapped_endpoint
 
         self.logger.debug(
             f"Bot {bot_name} (bot_id: {self._bot_ids.get(bot_name, '')}) 调用API:{endpoint} 参数:{params}"
@@ -1466,14 +2039,21 @@ class YunhuAdapter(sdk.BaseAdapter):
                     raw=raw_response,
                 )
             else:
-                data = raw_response.get("data", {})
+                data = raw_response.get("data", {}) or {}
                 message_id = (
                     data.get("messageInfo", {}).get("msgId", "")
                     if "messageInfo" in data
                     else data.get("msgId", "")
                 )
+                # 保留平台返回的真实 data（如标签列表 / 历史消息 / 看板等），
+                # 发送类响应（含 messageInfo）额外注入 message_id/time 便于调用方读取。
+                if isinstance(data, dict):
+                    data = dict(data)  # 浅拷贝，避免改动 raw
+                    if message_id:
+                        data.setdefault("message_id", message_id)
+                        data.setdefault("time", time.time())
                 resp = self.make_response(
-                    data={"message_id": message_id, "time": time.time()},
+                    data=data,
                     message_id=message_id,
                     raw=raw_response,
                 )

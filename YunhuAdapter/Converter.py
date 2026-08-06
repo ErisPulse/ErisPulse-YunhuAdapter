@@ -1,9 +1,11 @@
 """
 云湖平台事件转换模块
-严格遵循OneBot 12标准格式进行事件转换
+严格遵循 OneBot 12 标准格式进行事件转换
 
 {!--< tips >!--}
-注意：云湖平台特有字段均添加 yunhu_ 前缀作为扩展字段
+1. 继承 BaseConverter 基类，复用公共字段构建与消息段辅助方法
+2. 云湖平台特有字段均添加 yunhu_ 前缀作为扩展字段
+3. 原始数据完整保留在 yunhu_raw 字段（无损转换）
 {!--< /tips >!--}
 """
 
@@ -13,14 +15,23 @@ import uuid
 from typing import Dict, List, Optional
 
 from ErisPulse.Core import logger
+from ErisPulse.Core.Bases import BaseConverter
 
 
-class YunhuConverter:
+class YunhuConverter(BaseConverter):
+    """
+    云湖平台事件转换器
+
+    将云湖原生事件（header/event 嵌套结构）转换为 OneBot12 标准格式。
+    机器人 ID (bot_id) 不包含在云湖事件中，由适配器运行时探测后注入。
+    """
+
     def __init__(self):
+        super().__init__(platform="yunhu")
         self._setup_event_mapping()
 
     def _setup_event_mapping(self):
-        """初始化事件类型映射 (符合OneBot12标准)"""
+        """初始化事件类型映射 (符合 OneBot12 标准)"""
         self.event_map = {
             # 标准消息事件
             "message.receive.normal": "message",
@@ -30,11 +41,46 @@ class YunhuConverter:
             "bot.unfollowed": "notice.friend_decrease",
             "group.join": "notice.group_member_increase",
             "group.leave": "notice.group_member_decrease",
-            # 云湖特有事件（添加yunhu_前缀）
+            # 云湖特有事件（添加 yunhu_ 前缀）
             "button.report.inline": "notice.yunhu_button_click",
             "a2ui.button.report": "notice.yunhu_a2ui_button",
             "bot.shortcut.menu": "notice.yunhu_shortcut_menu",
             "bot.setting": "notice.yunhu_bot_setting",
+        }
+
+    def _build_base(
+        self, data: Dict, event_type: str, bot_id: Optional[str] = None
+    ) -> Dict:
+        """
+        构建 OneBot12 公共字段
+
+        云湖事件结构为 {version, header:{eventId,eventTime,eventType}, event:{...}}，
+        与 BaseConverter.build_base_event 期望的扁平结构不同，故在此单独构建。
+
+        :param data: 云湖原始事件
+        :param event_type: 原始事件类型 (header.eventType)
+        :param bot_id: 运行时探测的机器人 ID
+        """
+        header = data.get("header", {})
+        event_time = header.get("eventTime", int(time.time() * 1000))
+        # 云湖使用毫秒级时间戳，OneBot12 标准要求秒级
+        if event_time and event_time > 10**12:
+            event_time = int(event_time / 1000)
+
+        return {
+            "id": str(header.get("eventId", "") or uuid.uuid4()),
+            "time": int(event_time or time.time()),
+            "type": "",
+            "detail_type": "",
+            "sub_type": "",
+            "platform": self.platform,
+            "self": {
+                "platform": self.platform,
+                "user_id": bot_id if bot_id else "",
+            },
+            "user_nickname": "",
+            "yunhu_raw": data,
+            "yunhu_raw_type": event_type,
         }
 
     def convert(self, data: Dict, bot_id: str = None) -> Optional[Dict]:
@@ -42,8 +88,8 @@ class YunhuConverter:
         主转换方法
 
         :param data: 原始事件数据
-        :param bot_id: 机器人ID（用于设置self.user_id）
-        :return: 符合OneBot12标准的事件字典
+        :param bot_id: 机器人ID（运行时探测注入，用于设置 self.user_id）
+        :return: 符合 OneBot12 标准的事件字典；无法识别时返回 None
         """
         if not isinstance(data, dict):
             raise ValueError("事件数据必须是字典类型")
@@ -52,25 +98,9 @@ class YunhuConverter:
         event_type = header.get("eventType", "")
 
         if not event_type:
-            raise ValueError("事件数据缺少eventType字段")
+            raise ValueError("事件数据缺少 eventType 字段")
 
-        onebot_event = {
-            "id": header.get("eventId", str(uuid.uuid4())),
-            "time": int(header.get("eventTime", time.time() * 1000) / 1000),
-            "type": "",
-            "detail_type": "",
-            "sub_type": "",
-            "platform": "yunhu",
-            "self": {
-                "platform": "yunhu",
-                "user_id": bot_id if bot_id else "",  # 使用传入的bot_id
-            },
-            # 基础字段：用户昵称
-            "user_nickname": "",
-            # 扩展字段：保留原始数据和原始事件类型
-            "yunhu_raw": data,
-            "yunhu_raw_type": event_type,
-        }
+        onebot_event = self._build_base(data, event_type, bot_id)
 
         mapped_type = self.event_map.get(event_type, "")
         if "." in mapped_type:
@@ -132,7 +162,7 @@ class YunhuConverter:
             if at_user_ids:
                 text = self._strip_at_text(text)
             if text:
-                message_segments.append({"type": "text", "data": {"text": text}})
+                message_segments.append(self.text(text))
                 alt_message.append(text)
 
         elif content_type in ("markdown", "html"):
@@ -144,7 +174,7 @@ class YunhuConverter:
                 if at_user_ids:
                     text = self._strip_at_text(text)
                 if text:
-                    message_segments.append({"type": "text", "data": {"text": text}})
+                    message_segments.append(self.text(text))
                     alt_message.append(text)
 
                 # 同时保留原始的 markdown/html 内容
@@ -166,6 +196,11 @@ class YunhuConverter:
             media_data = self._build_media_data(content, "file")
             message_segments.append({"type": "file", "data": media_data})
             alt_message.append(f"[文件:{media_data.get('file_name', '')}]")
+
+        elif content_type == "audio":
+            media_data = self._build_media_data(content, "audio")
+            message_segments.append({"type": "audio", "data": media_data})
+            alt_message.append(f"[语音:{media_data.get('file_name', '')}]")
 
         elif content_type == "expression":
             expression_data = {
@@ -205,6 +240,10 @@ class YunhuConverter:
         chat_type = chat_info.get("chatType", "")
         base_event["detail_type"] = "private" if chat_type == "bot" else "group"
 
+        # 云湖 senderUserLevel → OneBot12 标准 role（owner/admin/member）
+        sender_level = sender.get("senderUserLevel", "")
+        base_event["yunhu_sender_level"] = sender_level
+
         base_event.update(
             {
                 "type": "message",
@@ -213,11 +252,14 @@ class YunhuConverter:
                 "alt_message": "".join(alt_message),
                 "user_id": sender.get("senderId", ""),
                 "user_nickname": sender.get("senderNickname", ""),
+                "user_avatar": sender.get("senderAvatarUrl", ""),
             }
         )
 
         if base_event["detail_type"] == "group":
             base_event["group_id"] = chat_info.get("chatId", "")
+            # 群消息携带标准 role 字段（标签/头衔的语义映射见 EventMixin）
+            base_event["role"] = self._map_role(sender_level)
 
         if "receive.instruction" in event_type:
             command_data = self._build_command_data(
@@ -235,6 +277,15 @@ class YunhuConverter:
                     base_event["alt_message"] = f"/{command_name} {args}".strip()
 
         return base_event
+
+    @staticmethod
+    def _map_role(sender_level: str) -> str:
+        """云湖 senderUserLevel → OneBot12 标准 role"""
+        return {
+            "owner": "owner",
+            "administrator": "admin",
+            "member": "member",
+        }.get(sender_level, "member")
 
     @staticmethod
     def _strip_at_text(text: str) -> str:
@@ -409,7 +460,7 @@ class YunhuConverter:
         return base_event
 
     def _build_media_data(self, content: Dict, media_type: str) -> Dict:
-        """构建标准媒体数据 (OneBot12兼容)"""
+        """构建标准媒体数据 (OneBot12 兼容)"""
         media_map = {
             "image": ("imageUrl", "imageName", "imageWidth", "imageHeight"),
             "video": (
@@ -419,6 +470,7 @@ class YunhuConverter:
                 "videoHeight",
                 "videoDuration",
             ),
+            "audio": ("audioUrl", "audioName", "audioDuration"),
             "file": ("fileUrl", "fileName", "fileSize"),
         }
 
@@ -426,8 +478,10 @@ class YunhuConverter:
         raw_url = content.get(url_key, "")
 
         url_prefixes = {
+            "image": "",
             "video": "https://chat-video1.jwznb.com/",
             "file": "https://chat-file.jwznb.com/",
+            "audio": "",
         }
         prefix = url_prefixes.get(media_type, "")
         if raw_url and prefix and not raw_url.startswith("http"):
@@ -455,6 +509,8 @@ class YunhuConverter:
                     "duration": content.get(extra_keys[2], 0),
                 }
             )
+        elif media_type == "audio":
+            media_data["duration"] = content.get(extra_keys[0], 0)
         elif media_type == "file":
             media_data["size"] = content.get(extra_keys[0], 0)
 

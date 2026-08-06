@@ -253,6 +253,10 @@ await yunhu.Send.To("user", "user123").Text("Hello from default bot!")
 
 请参考 [云湖平台特性文档](platform-features.md) 了解云湖平台的特有功能，包括特有消息段类型、扩展字段说明、表单消息事件、按钮点击事件、机器人设置事件和快捷菜单事件等内容。
 
+## 系列教程
+
+从零到一学习云湖机器人开发：[ErisPulse x 云湖 · 系列教程](./YunhuPost/README.md)（安装配置 → SendDSL → 命令系统 → 数据存储 → 交互 → Api 标准动作，共 10 篇）。
+
 ## 事件监听示例
 
 ### 使用 Event 模块（推荐）
@@ -280,13 +284,59 @@ async def handle_command(event):
     await event.reply("测试命令已收到")
 ```
 
+### 云湖 EventMixin 扩展方法
+
+云湖适配器为事件对象注册了平台扩展方法，可在事件处理器中直接调用：
+
+```python
+@message.on_message()
+async def handle(event):
+    if event.get_platform() != "yunhu":
+        return
+    # 发送者信息
+    role = event.get_sender_role()         # owner / admin / member（标准映射）
+    avatar = event.get_sender_avatar()     # 头像 URL
+    level = event.get_sender_level()       # 云湖原生级别
+
+@notice.on_notice()
+async def handle_notice(event):
+    if event.is_button_click():
+        value = event.get_button_value()   # 按钮值
+    elif event.is_a2ui_button():
+        action = event.get_a2ui_action()   # A2UI 操作名
+        ctx = event.get_a2ui_form_context()  # 表单上下文
+```
+
+可用方法：`get_sender_role` / `get_sender_title` / `get_sender_level` / `get_sender_avatar` / `get_raw_event` / `get_command` / `get_button_value` / `get_a2ui_action` / `get_a2ui_form_context` / `get_menu_id` / `get_setting` / `is_command_message` / `is_button_click` / `is_a2ui_button`。
+
+## 标准 API 动作（Api DSL）
+
+跨平台标准动作通过 `Api` 调用（详见 [平台特性文档](platform-features.md#标准-api-动作apidsl)）：
+
+```python
+yunhu = sdk.adapter.get("yunhu")
+
+# 信息查询（公开 Web API，无需鉴权）
+await yunhu.Api.get_self_info()
+await yunhu.Api.get_user_info("7058262")
+await yunhu.Api.get_group_info("635409929")
+
+# 文件上传 / 撤回消息
+await yunhu.Api.upload_file(type="path", name="a.png", path="./a.png")
+await yunhu.Api.delete_message("msg_id", chat_id="123", chat_type="group")
+
+# 平台扩展动作
+await yunhu.Api.call("yunhu.kick", group_id="123", user_id="456")
+await yunhu.Api.call("yunhu.set_member_title", group_id="123", user_id="456", title="VIP")
+```
+
 ## 注意事项
 
 1. 事件处理器通过装饰器在模块加载时自动注册，无需手动调用
 2. 生产环境建议配置服务器反向代理指向 webhook 地址以实现 HTTPS
 3. 二进制内容（图片/视频等）支持 `bytes`、本地路径、URL 三种传入方式
 4. 程序退出时框架会自动调用适配器的 `shutdown()` 释放资源
-5. 云湖平台的事件不包含机器人ID，必须在配置中正确设置 `bot_id`
+5. 云湖平台的事件不包含机器人ID，适配器会在启动时自动探测 bot_id（向空群发探测请求解析错误信息）
 6. 多 Bot 配置时，确保每个 Bot 有独立的 `webhook_path`，并在云湖平台配置对应URL
 
 ---
