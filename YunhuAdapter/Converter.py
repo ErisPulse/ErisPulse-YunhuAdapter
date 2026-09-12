@@ -394,6 +394,12 @@ class YunhuConverter(BaseConverter):
                 },
             }
         )
+        # 跨平台交互组件标准字段（见 docs/zh-CN/standards/interactive-components.md）
+        base_event["interaction_id"] = str(event_data.get("buttonId", ""))
+        button_value = event_data.get("value", "")
+        base_event["button_data"] = (
+            button_value if isinstance(button_value, str) else str(button_value)
+        )
         return base_event
 
     def _handle_a2ui_button_event(
@@ -416,6 +422,9 @@ class YunhuConverter(BaseConverter):
                 },
             }
         )
+        # 跨平台交互组件标准字段
+        base_event["interaction_id"] = str(event_data.get("sourceComponentId", ""))
+        base_event["button_data"] = str(event_data.get("actionName", ""))
         return base_event
 
     def _handle_menu_event(

@@ -17,6 +17,16 @@ from ErisPulse.Core.Bases.errors import (
 )
 from ErisPulse.Core.Bases.websocket import WSMessage
 
+try:
+    from ErisPulse.runtime.tasks import spawn_background
+except ImportError:  # pragma: no cover
+    spawn_background = None
+
+__version__ = "4.4.0"
+
+# 软依赖的框架最低版本（运行时检测，仅提示不强制）
+MIN_FRAMEWORK_VERSION = (2, 7, 1)
+
 
 def _mask_token(url: str) -> str:
     return re.sub(r"([?&]token=)[^&]*", r"\1***", url)
@@ -463,6 +473,170 @@ class YunhuAdapter(BaseAdapter):
                 chatType=str(chat_type),
             )
 
+        # ==================== 官方服务端 API 扩展 ====================
+
+        async def _bot_request(
+            self, path: str, payload: Optional[dict] = None, method: str = "POST", query: Optional[dict] = None
+        ) -> dict:
+            """
+            调用官方服务端 API（chat-go.jwzhd.com/open-apis，token 鉴权）
+
+            始终返回原始 {code, msg, data} 结构（code==1 为成功）。
+            """
+            adapter = self._adapter
+            bot_name, bot = adapter._resolve_account(self._account_id)
+            url = f"{adapter.base_url}{path}?token={bot.token}"
+            try:
+                if method.upper() == "GET":
+                    resp = await client.get(url, params=query or {})
+                else:
+                    resp = await client.post(url, json=payload or {})
+                return await resp.json()
+            except ClientTimeoutError:
+                return {"code": -1, "msg": f"官方API请求超时: {path}"}
+            except ClientError as e:
+                return {"code": -1, "msg": f"官方API网络错误: {e}"}
+            except Exception as e:
+                return {"code": -1, "msg": f"官方API请求异常: {e}"}
+
+        async def edit_message(
+            self, message_id: str, recv_id: str, recv_type: str,
+            content_type: str = "text", content: Any = None,
+        ) -> dict:
+            """编辑已发送消息（POST /bot/edit）"""
+            return await self._adapter.call_api(
+                "/bot/edit", _account_id=self._account_id,
+                msgId=str(message_id), recvId=str(recv_id), recvType=str(recv_type),
+                contentType=content_type, content=content or {"text": " "},
+            )
+
+        async def batch_send(
+            self, user_ids: List[str], content_type: str = "text", content: Any = None
+        ) -> dict:
+            """批量给机器人用户发送消息（POST /bot/batch_send）"""
+            return await self._adapter.call_api(
+                "/bot/batch_send", _account_id=self._account_id,
+                userIds=[str(u) for u in user_ids],
+                contentType=content_type, content=content or {"text": " "},
+            )
+
+        async def get_message_list(
+            self, chat_id: str, chat_type: str,
+            message_id: Optional[str] = None, before: Optional[int] = None, after: Optional[int] = None,
+        ) -> dict:
+            """获取消息列表（GET /bot/messages，支持 before/after 翻页）"""
+            query: Dict[str, Any] = {"chat-id": str(chat_id), "chat-type": str(chat_type)}
+            if message_id:
+                query["message-id"] = str(message_id)
+            if before is not None:
+                query["before"] = int(before)
+            if after is not None:
+                query["after"] = int(after)
+            raw = await self._bot_request("/bot/messages", method="GET", query=query)
+            return self._adapter._standardize_web_result(raw)
+
+        async def set_user_board(
+            self, chat_id: str, chat_type: str, content: str,
+            content_type: str = "text", expire_time: int = 0,
+        ) -> dict:
+            """设置用户/群看板（POST /bot/board）"""
+            payload: Dict[str, Any] = {
+                "chatId": str(chat_id), "chatType": str(chat_type),
+                "contentType": content_type, "content": content,
+            }
+            if expire_time:
+                payload["expireTime"] = int(expire_time)
+            return await self._adapter.call_api("/bot/board", _account_id=self._account_id, **payload)
+
+        async def dismiss_user_board(self, chat_id: str, chat_type: str) -> dict:
+            """取消用户/群看板（POST /bot/board-dismiss）"""
+            return await self._adapter.call_api(
+                "/bot/board-dismiss", _account_id=self._account_id,
+                chatId=str(chat_id), chatType=str(chat_type),
+            )
+
+        async def set_global_board(self, content: str, content_type: str = "text", expire_time: int = 0) -> dict:
+            """设置全局看板（POST /bot/board-all）"""
+            payload: Dict[str, Any] = {"contentType": content_type, "content": content}
+            if expire_time:
+                payload["expireTime"] = int(expire_time)
+            return await self._adapter.call_api("/bot/board-all", _account_id=self._account_id, **payload)
+
+        async def dismiss_global_board(self) -> dict:
+            """取消全部看板（POST /bot/board-all-dismiss）"""
+            return await self._adapter.call_api("/bot/board-all-dismiss", _account_id=self._account_id)
+
+        async def gag_group_member(self, group_id: str, user_id: str, gag_seconds: int) -> dict:
+            """群成员禁言（POST /group/gag-member，gag 为禁言秒数，0 为解除）"""
+            return await self._adapter.call_api(
+                "/group/gag-member", _account_id=self._account_id,
+                groupId=str(group_id), userId=str(user_id), gag=int(gag_seconds),
+            )
+
+        async def remove_group_member(self, group_id: str, user_id: str) -> dict:
+            """移除群成员（POST /group/remove-member）"""
+            return await self._adapter.call_api(
+                "/group/remove-member", _account_id=self._account_id,
+                groupId=str(group_id), userId=str(user_id),
+            )
+
+        async def set_group_msg_type_limit(self, group_id: str, allow_types: str) -> dict:
+            """设置群允许发送的消息类型（POST /group/msg-type-limit，如 "text,image,video"）"""
+            return await self._adapter.call_api(
+                "/group/msg-type-limit", _account_id=self._account_id,
+                groupId=str(group_id), type=str(allow_types),
+            )
+
+        async def create_group_tag(
+            self, group_id: str, tag: str, color: str = "", desc: str = "", sort: int = 1
+        ) -> dict:
+            """创建群标签（POST /group/tag/create）"""
+            payload: Dict[str, Any] = {"groupId": str(group_id), "tag": tag, "sort": int(sort)}
+            if color:
+                payload["color"] = color
+            if desc:
+                payload["desc"] = desc
+            return await self._adapter.call_api("/group/tag/create", _account_id=self._account_id, **payload)
+
+        async def list_group_tags(self, group_id: str) -> dict:
+            """获取群标签列表（GET /group/tag/list）"""
+            raw = await self._bot_request("/group/tag/list", method="GET", query={"groupId": str(group_id)})
+            return self._adapter._standardize_web_result(raw)
+
+        async def edit_group_tag(
+            self, group_id: str, tag_id: str, tag: str = "", color: str = "", desc: str = "", sort: int = 1
+        ) -> dict:
+            """修改群标签（POST /group/tag/edit）"""
+            payload: Dict[str, Any] = {"groupId": str(group_id), "tagId": str(tag_id), "sort": int(sort)}
+            if tag:
+                payload["tag"] = tag
+            if color:
+                payload["color"] = color
+            if desc:
+                payload["desc"] = desc
+            return await self._adapter.call_api("/group/tag/edit", _account_id=self._account_id, **payload)
+
+        async def delete_group_tag(self, group_id: str, tag_id: str) -> dict:
+            """删除群标签（POST /group/tag/delete）"""
+            return await self._adapter.call_api(
+                "/group/tag/delete", _account_id=self._account_id,
+                groupId=str(group_id), tagId=str(tag_id),
+            )
+
+        async def add_user_tag(self, group_id: str, user_id: str, tag: str) -> dict:
+            """给用户添加标签（POST /group/tag/user-relate）"""
+            return await self._adapter.call_api(
+                "/group/tag/user-relate", _account_id=self._account_id,
+                groupId=str(group_id), userId=str(user_id), tag=tag,
+            )
+
+        async def remove_user_tag(self, group_id: str, user_id: str, tag: str) -> dict:
+            """给用户移除标签（POST /group/tag/user-relate-cancel）"""
+            return await self._adapter.call_api(
+                "/group/tag/user-relate-cancel", _account_id=self._account_id,
+                groupId=str(group_id), userId=str(user_id), tag=tag,
+            )
+
     class Send(sdk.BaseAdapter.Send):
         """
         消息发送DSL实现
@@ -483,8 +657,61 @@ class YunhuAdapter(BaseAdapter):
             self._board_member_id: Optional[str] = None
 
         def Buttons(self, buttons: List):
-            self._buttons = buttons
+            """
+            附加按钮（键盘）
+
+            :param buttons: 兼容两种输入：
+                - 通用标准结构：[[{"label": "..", "type": "callback|link", "data": ".."}]]
+                - 原生结构：[{"label": "..", "action_type": 1|2, "url"/"action"/"value": ..}]
+            :return: Send 实例，支持链式调用
+
+            :example:
+            >>> rows = [[{"label": "官网", "type": "link", "data": "https://example.com"}]]
+            >>> await yunhu.Send.To("group", group_id).Buttons(rows).Text("请选择")
+            """
+            self._buttons = self._normalize_yunhu_buttons(buttons)
             return self
+
+        def Keyboard(self, buttons: List):
+            """`.Buttons()` 的标准别名（跨平台交互组件标准）"""
+            return self.Buttons(buttons)
+
+        @staticmethod
+        def _normalize_yunhu_buttons(buttons):
+            """
+            按钮结构归一化：通用标准 rows → 云湖原生 buttons；原生结构原样透传（向后兼容）
+
+            - callback → {"label", "action_type": 2, "action": "button_click", "value": data}
+            - link     → {"label", "action_type": 1, "url": data}
+            """
+            if not isinstance(buttons, list):
+                return buttons
+            try:
+                if buttons and isinstance(buttons[0], list):
+                    flat = [b for row in buttons for b in row]
+                else:
+                    flat = buttons
+                if not flat or not isinstance(flat[0], dict):
+                    return buttons
+                if all("action_type" in b or "label" not in b for b in flat):
+                    return buttons  # 原生结构
+                normalized = []
+                for b in flat:
+                    if not isinstance(b, dict):
+                        continue
+                    label = b.get("label", "")
+                    if b.get("type") == "link":
+                        normalized.append({"label": label, "action_type": 1, "url": b.get("data", "")})
+                    else:
+                        normalized.append({
+                            "label": label,
+                            "action_type": 2,
+                            "action": b.get("action", "button_click"),
+                            "value": b.get("value", b.get("data", "")),
+                        })
+                return normalized
+            except (TypeError, AttributeError):
+                return buttons
 
         def Expire(self, duration: int):
             self._board_expire = duration
@@ -996,6 +1223,19 @@ class YunhuAdapter(BaseAdapter):
         def Raw_ob12(self, message, **kwargs):
             if isinstance(message, dict):
                 message = [message]
+
+            # 标准 keyboard 段（跨平台通用）→ 云湖 buttons
+            keyboard_rows = [
+                seg for seg in message if isinstance(seg, dict) and seg.get("type") == "keyboard"
+            ]
+            if keyboard_rows:
+                self._buttons = self._normalize_yunhu_buttons(
+                    keyboard_rows[-1].get("data", {}).get("rows", [])
+                )
+                message = [
+                    seg for seg in message
+                    if not (isinstance(seg, dict) and seg.get("type") == "keyboard")
+                ]
 
             grouped_messages = self._group_ob12_messages(message)
 
@@ -1582,6 +1822,39 @@ class YunhuAdapter(BaseAdapter):
         self._is_running = False
 
         self.convert = self._setup_converter()
+
+        self._check_framework_version()
+        self._get_logger().info(f"YunhuAdapter v{__version__} 已加载")
+
+    @staticmethod
+    def _parse_version(version_str: str) -> tuple:
+        """解析版本号为可比较的三元组（忽略 dev/预发布后缀，如 2.8.0-dev.3 → (2, 8, 0)）"""
+        parts = []
+        for piece in str(version_str).split("."):
+            digits = "".join(ch for ch in piece if ch.isdigit())
+            parts.append(int(digits) if digits else 0)
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
+
+    def _check_framework_version(self):
+        """软依赖检测：框架版本过低时打警告（不阻断加载）"""
+        try:
+            from importlib.metadata import version as _pkg_version
+
+            raw = _pkg_version("ErisPulse")
+        except Exception:
+            return
+        try:
+            if self._parse_version(raw) < MIN_FRAMEWORK_VERSION:
+                self._get_logger().warning(
+                    f"当前 ErisPulse 版本 {raw} 过低：YunhuAdapter v{__version__} 需要 >= "
+                    f"{'.'.join(map(str, MIN_FRAMEWORK_VERSION))}"
+                    "（BaseConverter / Api DSL / spawn_background 等特性），"
+                    "部分功能可能不可用，建议升级框架"
+                )
+        except Exception:
+            pass
 
     def _setup_converter(self):
         from .Converter import YunhuConverter
@@ -2280,7 +2553,11 @@ class YunhuAdapter(BaseAdapter):
                 await self.emit_meta("connect", self._bot_ids.get(bot_name, ""))
 
         for bot_name in ws_bots:
-            self._ws_tasks[bot_name] = asyncio.create_task(self._ws_connect(bot_name))
+            coro = self._ws_connect(bot_name)
+            # 生命周期任务使用 spawn_background（owner 归属，shutdown 自动回收）
+            self._ws_tasks[bot_name] = (
+                spawn_background(coro) if spawn_background is not None else asyncio.create_task(coro)
+            )
 
         mode_summary = []
         if webhook_bots:
