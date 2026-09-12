@@ -730,7 +730,6 @@ class YunhuAdapter(BaseAdapter):
             self._board_expire = 0
             self._board_expire_at = 0
             self._board_member_id = None
-            self._keyboard_rows = None
 
         def _build_content_with_modifiers(
             self, text: str, content_type: str, buttons: List = None
