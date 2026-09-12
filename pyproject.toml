@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "ErisPulse-YunhuAdapter"
 version = "4.4.0"
 description = "ErisPulse的云湖协议适配模块"
