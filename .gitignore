@@ -197,3 +197,6 @@ cython_debug/
 
 test/test_multi_bot.py
 test/config.toml
+
+YunhuAdapter4OneBot12/
+YunhuPost/
