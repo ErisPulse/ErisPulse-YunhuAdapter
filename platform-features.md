@@ -117,7 +117,7 @@ info = await yunhu.Api.Using("bot1").get_self_info()
 | `get_file(file_id)` | 获取文件（file_id 即 URL） | — |
 | `delete_message(message_id, *, chat_id, chat_type)` | 撤回消息 | Bot 开放 API（/bot/recall） |
 
-> **注意**：`get_self_info` / `get_user_info` / `get_group_info` 通过**非官方公开 Web API**（chat-web-go.jwzhd.com）实现，这些接口无需鉴权但非官方文档、可能随平台更新变动；失败时返回标准错误响应。
+> **注意**：`get_self_info` / `get_user_info` / `get_group_info` 通过**非官方公开 Web API**（chat-web-go.jwzhd.com）实现，这些接口无需鉴权但非官方文档、可能随平台更新变动；查询不存在的用户/群/机器人时（服务端仍返回 code=1 但数据为空壳），适配器返回标准错误响应（`status=failed`、`retcode=34001`，如 message 为 `用户不存在: xxx`）。
 
 ### 不支持的标准动作
 

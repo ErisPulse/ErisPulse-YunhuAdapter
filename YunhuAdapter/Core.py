@@ -22,7 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.4.0"
+__version__ = "4.5.0"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -323,7 +323,11 @@ class YunhuAdapter(BaseAdapter):
                     retcode=34001, message=raw.get("msg", "获取机器人信息失败"), raw=raw
                 )
             bot = raw.get("data", {}).get("bot", {})
-            user_id = str(bot.get("botId", bot_id))
+            if self._adapter._web_entity_missing(raw, "bot", "botId"):
+                return self._adapter.make_error(
+                    retcode=34001, message=f"机器人不存在: {bot_id}", raw=raw
+                )
+            user_id = str(bot.get("botId") or "")
             user_name = bot.get("nickname", "")
             data = {
                 "user_id": user_id,
@@ -350,13 +354,21 @@ class YunhuAdapter(BaseAdapter):
                     retcode=34001, message=raw.get("msg", "获取用户信息失败"), raw=raw
                 )
             u = raw.get("data", {}).get("user", {})
+            if self._adapter._web_entity_missing(raw, "user", "userId"):
+                return self._adapter.make_error(
+                    retcode=34001, message=f"用户不存在: {user_id}", raw=raw
+                )
             data = {
-                "user_id": str(u.get("userId", user_id)),
+                "user_id": str(u.get("userId", "")),
                 "user_name": u.get("nickname", ""),
                 "user_displayname": u.get("nickname", ""),
                 "user_remark": "",
                 "user_avatar": u.get("avatarUrl", ""),
                 "register_time": u.get("registerTime", 0),
+                "register_time_text": u.get("registerTimeText", ""),
+                "on_line_day": u.get("onLineDay", 0),
+                "continuous_on_line_day": u.get("continuousOnLineDay", 0),
+                "medals": u.get("medals", []),
                 "is_vip": u.get("isVip", 0),
             }
             self._adapter.logger.info(
@@ -375,8 +387,12 @@ class YunhuAdapter(BaseAdapter):
                     retcode=34001, message=raw.get("msg", "获取群信息失败"), raw=raw
                 )
             g = raw.get("data", {}).get("group", {})
+            if self._adapter._web_entity_missing(raw, "group", "groupId"):
+                return self._adapter.make_error(
+                    retcode=34001, message=f"群不存在: {group_id}", raw=raw
+                )
             data = {
-                "group_id": str(g.get("groupId", group_id)),
+                "group_id": str(g.get("groupId", "")),
                 "group_name": g.get("name", ""),
                 "group_avatar": g.get("avatarUrl", ""),
                 "group_introduction": g.get("introduction", ""),
@@ -2217,6 +2233,16 @@ class YunhuAdapter(BaseAdapter):
 
         return platform_endpoint
 
+    def _web_entity_missing(self, raw: dict, container: str, id_key: str) -> bool:
+        """
+        判断公开 Web API 的成功响应是否为"空壳"。
+
+        公开 Web API 对不存在的查询对象仍返回 code=1/msg=success，
+        仅 data.<container> 内字段全空（如 userId 为 ""），需据此判定实体不存在。
+        """
+        entity = (raw.get("data") or {}).get(container) or {}
+        return not entity or not str(entity.get(id_key) or "").strip()
+
     def _standardize_web_result(self, raw) -> dict:
         """
         将公开 Web API 的原始响应（{code, msg, data}）标准化为标准响应格式。
@@ -2263,19 +2289,31 @@ class YunhuAdapter(BaseAdapter):
                     msg_params[k] = v
             return await self.get_messages(_account_id=_account_id, **msg_params)
         if endpoint == "yunhu.bot_info":
+            bot_id = str(params.get("bot_id", ""))
             raw = await self.Api._web_request(
-                "/v1/bot/bot-info", {"botId": str(params.get("bot_id", ""))}
+                "/v1/bot/bot-info", {"botId": bot_id}
             )
-            resp = self._standardize_web_result(raw)
+            if self._web_entity_missing(raw, "bot", "botId"):
+                resp = self.make_error(
+                    retcode=34001, message=f"机器人不存在: {bot_id}", raw=raw
+                )
+            else:
+                resp = self._standardize_web_result(raw)
             resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
             return resp
         if endpoint == "yunhu.user_homepage":
+            query_user_id = str(params.get("user_id", ""))
             raw = await self.Api._web_request(
                 "/v1/user/homepage",
-                {"userId": str(params.get("user_id", ""))},
+                {"userId": query_user_id},
                 method="GET",
             )
-            resp = self._standardize_web_result(raw)
+            if self._web_entity_missing(raw, "user", "userId"):
+                resp = self.make_error(
+                    retcode=34001, message=f"用户不存在: {query_user_id}", raw=raw
+                )
+            else:
+                resp = self._standardize_web_result(raw)
             resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
             return resp
 
