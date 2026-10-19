@@ -1,4 +1,5 @@
 import asyncio
+import html as _html
 import io
 import json
 import re
@@ -22,7 +23,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.4.1"
+__version__ = "4.5.0"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -30,6 +31,64 @@ MIN_FRAMEWORK_VERSION = (2, 7, 1)
 
 def _mask_token(url: str) -> str:
     return re.sub(r"([?&]token=)[^&]*", r"\1***", url)
+
+
+def _forward_node_text(node: Dict) -> str:
+    """提取合并转发节点 content 中全部 text 段文本（段间直接连接）"""
+    data = node.get("data") or {}
+    return "".join(
+        str(seg.get("data", {}).get("text") or "")
+        for seg in (data.get("content") or [])
+        if isinstance(seg, dict) and seg.get("type") == "text"
+    )
+
+
+def _forward_nodes_plain(nodes, separator: str = "\n") -> str:
+    """合并转发节点降级纯文本：每条「昵称: 正文」"""
+    lines = []
+    for node in nodes if isinstance(nodes, list) else [nodes]:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") or {}
+        nickname = str(data.get("nickname") or "").strip()
+        text = _forward_node_text(node).strip()
+        if nickname and text:
+            lines.append(f"{nickname}: {text}")
+        elif text:
+            lines.append(text)
+    return separator.join(lines)
+
+
+def _build_forward_html(nodes, title: str = "合并聊天记录") -> str:
+    """渲染合并转发折叠 HTML 卡片（<details> 折叠 + CSS 系统色，自动适配明暗主题）"""
+    bubbles = []
+    for node in nodes if isinstance(nodes, list) else [nodes]:
+        if not isinstance(node, dict):
+            continue
+        data = node.get("data") or {}
+        nickname = str(data.get("nickname") or "")
+        text = _forward_node_text(node).strip()
+        if not text:
+            continue
+        body = _html.escape(text).replace("\n", "<br>")
+        bubbles.append(
+            '<div style="margin:8px 0;padding:10px 12px;border:1px solid GrayText;border-radius:8px;'
+            'background:Canvas;color:CanvasText;">'
+            '<div style="font-size:12px;line-height:1.4;margin-bottom:6px;color:GrayText;">'
+            f"<strong>{_html.escape(nickname)}</strong></div>"
+            '<div style="font-size:14px;line-height:1.6;word-break:break-word;color:CanvasText;">' + body + "</div></div>"
+        )
+    if not bubbles:
+        return ""
+    return (
+        '<div style="color:CanvasText;color-scheme:light dark;">'
+        '<details style="width:100%;box-sizing:border-box;border:1px solid GrayText;border-radius:10px;'
+        'background:Canvas;color:CanvasText;overflow:hidden;">'
+        '<summary style="list-style:none;cursor:pointer;padding:10px 12px;background:Canvas;'
+        'border-bottom:1px solid GrayText;font-size:14px;font-weight:600;color:CanvasText;">'
+        f"{_html.escape(title)}</summary>"
+        '<div style="padding:8px 10px;">' + "".join(bubbles) + "</div></details></div>"
+    )
 
 
 # 用于自动探测 bot_id 的空群聊：向该群发送消息会返回包含机器人ID的错误信息。
@@ -793,6 +852,33 @@ class YunhuAdapter(BaseAdapter):
                 ]
             )
 
+        def MergeForward(self, nodes, title: str = "合并聊天记录"):
+            """发送合并转发消息（渲染为折叠 HTML 卡片，经 html 段通道发出）
+
+            :param nodes: go-cqhttp 扩展的 OneBot v11 合并转发节点数组（或单节点 dict）
+            :param title: 折叠卡标题
+            :return: asyncio.Task
+            """
+            if isinstance(nodes, dict):
+                nodes = [nodes]
+            return asyncio.create_task(
+                self._do_send_merge_forward(
+                    [n for n in nodes if isinstance(n, dict)], title
+                )
+            )
+
+        async def _do_send_merge_forward(self, nodes, title: str = "合并聊天记录"):
+            html = _build_forward_html(nodes, title)
+            if not html:
+                return self._adapter.make_error(
+                    retcode=10006, message="MergeForward: 节点无有效文本内容"
+                )
+            result = await self._send_ob12_group(
+                [{"type": "html", "data": {"html": html}}]
+            )
+            self._reset_modifiers()
+            return result
+
         def Markdown(self, markdown: str):
             return self.Raw_ob12(
                 [
@@ -1252,6 +1338,20 @@ class YunhuAdapter(BaseAdapter):
                     seg for seg in message
                     if not (isinstance(seg, dict) and seg.get("type") == "keyboard")
                 ]
+
+            # node 段解析：纯 node 列表自动路由合并转发折叠卡；混合列表降级为纯文本
+            if message and all(
+                isinstance(seg, dict) and seg.get("type") == "node" for seg in message
+            ):
+                return asyncio.create_task(
+                    self._do_send_merge_forward([seg for seg in message])
+                )
+            message = [
+                {"type": "text", "data": {"text": _forward_nodes_plain(seg)}}
+                if isinstance(seg, dict) and seg.get("type") == "node"
+                else seg
+                for seg in message
+            ]
 
             grouped_messages = self._group_ob12_messages(message)
 
