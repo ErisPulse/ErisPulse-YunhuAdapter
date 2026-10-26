@@ -23,7 +23,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.5.0"
+__version__ = "4.5.1"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -806,12 +806,28 @@ class YunhuAdapter(BaseAdapter):
             self._board_expire_at = 0
             self._board_member_id = None
 
+        @staticmethod
+        def _format_at_text(user_id: str, user_name: str = None) -> str:
+            """
+            云湖文本艾特格式：``@昵称(用户ID)``
+
+            云湖客户端按该模式解析并渲染艾特（昵称缺失时以 ID 充当昵称），
+            后续内容需以空格分隔（由调用方拼接保证）。
+            """
+            uid = str(user_id or "").strip()
+            if not uid:
+                return ""
+            name = str(user_name or "").strip() or uid
+            return f"@{name}({uid})"
+
         def _build_content_with_modifiers(
             self, text: str, content_type: str, buttons: List = None
         ) -> Dict:
             result = {"text": text}
             if self._at_user_ids:
-                at_text = " ".join([f"@{uid}" for uid in self._at_user_ids])
+                at_text = " ".join(
+                    self._format_at_text(uid) for uid in self._at_user_ids
+                )
                 result["text"] = at_text + " " + result["text"]
             resolved_buttons = self._buttons if self._buttons is not None else buttons
             if resolved_buttons is not None:
@@ -1418,13 +1434,18 @@ class YunhuAdapter(BaseAdapter):
                     if s_type == "text":
                         text_parts.append(s_data.get("text", ""))
                     elif s_type == "mention":
-                        user_id = s_data.get("user_id", "")
-                        text_parts.append(f"@{user_id}")
+                        at_text = self._format_at_text(
+                            s_data.get("user_id", ""), s_data.get("user_name")
+                        )
+                        if at_text:
+                            text_parts.append(at_text)
                     elif s_type == "reply":
                         parent_id = s_data.get("message_id", "")
 
                 if at_user_ids:
-                    at_text = " ".join([f"@{uid}" for uid in at_user_ids])
+                    at_text = " ".join(
+                        self._format_at_text(uid) for uid in at_user_ids
+                    )
                     text_parts.insert(0, at_text)
 
                 text = " ".join(text_parts) or " "
