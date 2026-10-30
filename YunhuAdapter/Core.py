@@ -23,7 +23,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.5.1"
+__version__ = "4.6.0"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -173,7 +173,12 @@ class YunhuBotConfig(BotAccountConfig):
         metadata={
             "description": {"i18n": "yunhu.webhook_path", "default": "Webhook 路径（仅 webhook 模式）"},
             "required": False,
-            "ui": {"widget": "text", "group": "connection", "order": 4},
+            "ui": {
+                "widget": "text",
+                "group": "connection",
+                "order": 4,
+                "show_if": {"field": "mode", "op": "eq", "value": "webhook"},
+            },
         },
     )
 
