@@ -1,20 +1,18 @@
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [Русский](README.ru.md)
+
 <div align="center">
 
-<img src=".github/assets/ErisPulseLogo.png" width="180" alt="ErisPulse YunhuAdapter" />
+<img src="https://raw.githubusercontent.com/ErisPulse/ErisPulse/main/.github/assets/ErisPulseLogo.png" width="180" alt="ErisPulse-YunhuAdapter" />
 
-# ErisPulse YunhuAdapter
+# ErisPulse-YunhuAdapter
 
-**云湖协议适配器 —— AI时代的社交聊天平台**
-
-基于 ErisPulse 架构的云湖协议适配器，整合所有云湖功能模块，提供统一的事件处理和消息操作接口，支持 WebSocket / Webhook 双模式与多 Bot 配置。
+**ErisPulse adapter for Yunhu — enterprise IM over WebSocket / Webhook**
 
 <p>
   <a href="https://pypi.org/project/ErisPulse-YunhuAdapter/"><img src="https://img.shields.io/pypi/v/ErisPulse-YunhuAdapter?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"></a>
   <a href="https://pypi.org/project/ErisPulse-YunhuAdapter/"><img src="https://img.shields.io/badge/Python-3.10+-FFD43B?style=for-the-badge&logo=python&logoColor=blue" alt="Python"></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
-  <a href="https://github.com/ErisPulse/ErisPulse-YunhuAdapter"><img src="https://img.shields.io/github/stars/ErisPulse/ErisPulse-YunhuAdapter?style=for-the-badge&logo=github&color=brightgreen" alt="Stars"></a>
-  <a href="https://pepy.tech/project/ErisPulse-YunhuAdapter"><img src="https://img.shields.io/pepy/dt/ErisPulse-YunhuAdapter?style=for-the-badge&color=blue" alt="Downloads"></a>
-  <a href="https://github.com/ErisPulse/ErisPulse"><img src="https://img.shields.io/badge/Powered_by-ErisPulse-FF6B9D?style=for-the-badge&logo=bookstack&logoColor=white" alt="ErisPulse"></a>
+  <a href="https://github.com/ErisPulse/ErisPulse/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"></a>
+  <img src="https://raw.githubusercontent.com/ErisPulse/.github/main/assets/badges/adapter.svg" alt="ErisPulse">
 </p>
 
 </div>
