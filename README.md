@@ -6,7 +6,7 @@
 
 # ErisPulse-YunhuAdapter
 
-**ErisPulse adapter for Yunhu — enterprise IM over WebSocket / Webhook**
+**ErisPulse 云湖适配器 — 企业 IM，WebSocket / Webhook 双模式**
 
 <p>
   <a href="https://pypi.org/project/ErisPulse-YunhuAdapter/"><img src="https://img.shields.io/pypi/v/ErisPulse-YunhuAdapter?style=for-the-badge&logo=pypi&logoColor=white" alt="PyPI"></a>
