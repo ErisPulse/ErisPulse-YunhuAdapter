@@ -1,9 +1,11 @@
 import asyncio
+import base64
 import html as _html
 import io
 import json
 import re
 import time
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -23,7 +25,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.6.0"
+__version__ = "4.6.1"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -1380,9 +1382,14 @@ class YunhuAdapter(BaseAdapter):
                 results = []
                 for msg_group in grouped_messages:
                     result = await self._send_ob12_group(msg_group)
-                    results.append(result)
+                    if result is not None:
+                        results.append(result)
                 self._reset_modifiers()
-                return results[-1] if results else None
+                if not results:
+                    return self._adapter.make_error(
+                        retcode=10002, message="没有可发送的消息内容"
+                    )
+                return results[-1]
 
             return asyncio.create_task(_send_grouped_messages())
 
@@ -1549,15 +1556,17 @@ class YunhuAdapter(BaseAdapter):
                     "", buttons=buttons, parent_id=parent_id
                 )
 
+            elif seg_type == "mention_all":
+                self._adapter.logger.warning("云湖不支持 @全体成员，已忽略 mention_all 段")
+                return None
+
             elif seg_type.startswith("yunhu_"):
-                return await self._do_send_text(
-                    str(seg_data), buttons=buttons, parent_id=parent_id
-                )
+                self._adapter.logger.warning(f"忽略不支持的消息段: {seg_type}")
+                return None
 
             else:
-                return await self._do_send_text(
-                    str(seg_data), buttons=buttons, parent_id=parent_id
-                )
+                self._adapter.logger.warning(f"忽略不支持的消息段: {seg_type}")
+                return None
 
         def _do_send_text(self, text: str, buttons: List = None, parent_id: str = ""):
             if not isinstance(text, str):
@@ -1744,18 +1753,27 @@ class YunhuAdapter(BaseAdapter):
                 self._adapter.logger.error(f"读取文件失败: {file_path}, 错误: {str(e)}")
                 return None, None
 
-        async def _send_file_fail_text(self, subject: str, reason: str, kwargs: dict):
-            """上传失败时向目标发送文本说明消息"""
-            error_msg = f"[文件发送失败] 无法发送文件: {subject}\n原因: {reason}"
-            return await self._adapter.call_api(
-                endpoint="/bot/send",
-                _account_id=self._account_id,
-                recvId=self._target_id,
-                recvType=self._target_type,
-                contentType="text",
-                content={"text": error_msg},
-                parentId=kwargs.get("parent_id", ""),
-            )
+        @staticmethod
+        def _decode_inline_media(value: str) -> Optional[bytes]:
+            """解码 data: URI 或裸 base64 字符串为 bytes，非该形态返回 None"""
+            if value.startswith("data:"):
+                header, _, payload = value.partition(",")
+                try:
+                    if "base64" in header:
+                        return base64.b64decode(payload)
+                    return urllib.parse.unquote(payload).encode("utf-8")
+                except Exception:
+                    return None
+            if (
+                len(value) >= 256
+                and len(value) % 4 == 0
+                and re.fullmatch(r"[A-Za-z0-9+/]+={0,2}", value)
+            ):
+                try:
+                    return base64.b64decode(value, validate=True)
+                except Exception:
+                    return None
+            return None
 
         async def _upload_file_and_call_api(
             self, upload_endpoint, file_name, file, endpoint, content_type, **kwargs
@@ -1769,8 +1787,9 @@ class YunhuAdapter(BaseAdapter):
                 self._adapter.logger.info(f"检测到URL，开始下载: {file}")
                 file_buffer, downloaded_filename = await self._download_file_from_url(file)
                 if file_buffer is None:
-                    return await self._send_file_fail_text(
-                        file, "文件过大(超过100MB)或下载失败", kwargs
+                    return self._adapter.make_error(
+                        retcode=10002,
+                        message=f"文件发送失败: 文件过大(超过100MB)或下载失败: {file}",
                     )
                 if file_name is None and downloaded_filename:
                     file_name = downloaded_filename
@@ -1779,18 +1798,28 @@ class YunhuAdapter(BaseAdapter):
             elif isinstance(file, str):
                 import os
 
+                if file.startswith("file://"):
+                    file = file[len("file://"):]
+                elif file.startswith("file:"):
+                    file = file[len("file:"):]
                 if os.path.exists(file) and os.path.isfile(file):
                     self._adapter.logger.info(f"检测到本地文件路径，开始读取: {file}")
                     file_data, local_filename = self._read_local_file(file)
                     if file_data is None:
-                        return await self._send_file_fail_text(
-                            file, "文件不存在、过大或读取失败", kwargs
+                        return self._adapter.make_error(
+                            retcode=10002,
+                            message=f"文件发送失败: 文件不存在、过大或读取失败: {file}",
                         )
                     if file_name is None and local_filename:
                         file_name = local_filename
                     file_bytes = file_data
                 else:
-                    return await self._send_file_fail_text(file, "文件路径不存在", kwargs)
+                    decoded = self._decode_inline_media(file)
+                    if decoded is None:
+                        return self._adapter.make_error(
+                            retcode=10002, message=f"文件发送失败: 文件路径不存在: {file}"
+                        )
+                    file_bytes = decoded
 
             elif isinstance(file, (bytes, bytearray)):
                 file_bytes = bytes(file)
@@ -1806,7 +1835,10 @@ class YunhuAdapter(BaseAdapter):
                 # BytesIO / 文件对象
                 file_bytes = file.read()
             else:
-                raise ValueError("无法识别的文件类型")
+                return self._adapter.make_error(
+                    retcode=10002,
+                    message=f"文件发送失败: 无法识别的文件类型: {type(file).__name__}",
+                )
 
             # 2. 类型检测 + 构建上传文件名
             ext = self._adapter._detect_extension(file_bytes, file_name)
@@ -1822,17 +1854,23 @@ class YunhuAdapter(BaseAdapter):
                 )
             except ValueError as e:
                 self._adapter.logger.error(f"文件上传被拒绝: {_mask_token(upload_url)}: {e}")
-                return await self._send_file_fail_text(upload_filename, str(e), kwargs)
+                return self._adapter.make_error(
+                    retcode=10002, message=f"文件发送失败: 文件上传被拒绝: {e}"
+                )
             except (ClientTimeoutError, ClientError) as e:
                 self._adapter.logger.error(
                     f"文件上传失败: {_mask_token(upload_url)}, 错误: {str(e)}"
                 )
-                return await self._send_file_fail_text(upload_filename, "网络错误或上传超时", kwargs)
+                return self._adapter.make_error(
+                    retcode=10002, message="文件发送失败: 网络错误或上传超时"
+                )
             except Exception as e:
                 self._adapter.logger.error(
                     f"文件上传异常: {_mask_token(upload_url)}, 错误: {str(e)}"
                 )
-                raise
+                return self._adapter.make_error(
+                    retcode=10002, message=f"文件发送失败: 文件上传异常: {e}"
+                )
 
             # 4. 提取媒体 key 并调用发送接口
             key_name = {"image": "imageKey", "video": "videoKey", "file": "fileKey"}.get(
@@ -1842,7 +1880,9 @@ class YunhuAdapter(BaseAdapter):
                 media_value = self._adapter._extract_upload_key(upload_res, content_type)
             except ValueError as e:
                 self._adapter.logger.error(f"上传响应异常: {e}")
-                return await self._send_file_fail_text(upload_filename, str(e), kwargs)
+                return self._adapter.make_error(
+                    retcode=10002, message=f"文件发送失败: 上传响应异常: {e}"
+                )
 
             return await self._send_media_payload(
                 endpoint, key_name, media_value, content_type, kwargs
