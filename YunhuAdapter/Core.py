@@ -25,7 +25,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.6.1"
+__version__ = "4.6.2"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -207,6 +207,7 @@ class YunhuAdapter(BaseAdapter):
 
     ConfigClass = YunhuGlobalConfig
     AccountConfigClass = YunhuBotConfig
+    _platform = "yunhu"
 
     class I18nClass(BaseI18n):
         """云湖适配器翻译键声明"""
@@ -337,6 +338,10 @@ class YunhuAdapter(BaseAdapter):
         """
         云湖标准 API 动作实现（ApiDSL）
 
+        说明：edit_message / batch_send / set_user_board / gag_group_member /
+        create_group_tag 等以平台动作名为标准 Api 方法名，属历史遗留的平台扩展入口，
+        为兼容保留不删改；新代码应走 Api.call("yunhu.xxx")。
+
         {!--< tips >!--}
         1. get_self_info / get_user_info / get_group_info 通过非官方公开 Web API 实现（chat-web-go.jwzhd.com）
         2. upload_file 自动判定 image/video/file 类别上传到对应端点
@@ -386,12 +391,12 @@ class YunhuAdapter(BaseAdapter):
             )
             if raw.get("code") != 1:
                 return self._adapter.make_error(
-                    retcode=34001, message=raw.get("msg", "获取机器人信息失败"), raw=raw
+                    retcode=34100, message=raw.get("msg", "获取机器人信息失败"), raw=raw
                 )
             bot = raw.get("data", {}).get("bot", {})
             if self._adapter._web_entity_missing(raw, "bot", "botId"):
                 return self._adapter.make_error(
-                    retcode=34001, message=f"机器人不存在: {bot_id}", raw=raw
+                    retcode=10002, message=f"机器人不存在: {bot_id}", raw=raw
                 )
             user_id = str(bot.get("botId") or "")
             user_name = bot.get("nickname", "")
@@ -417,12 +422,12 @@ class YunhuAdapter(BaseAdapter):
             )
             if raw.get("code") != 1:
                 return self._adapter.make_error(
-                    retcode=34001, message=raw.get("msg", "获取用户信息失败"), raw=raw
+                    retcode=34100, message=raw.get("msg", "获取用户信息失败"), raw=raw
                 )
             u = raw.get("data", {}).get("user", {})
             if self._adapter._web_entity_missing(raw, "user", "userId"):
                 return self._adapter.make_error(
-                    retcode=34001, message=f"用户不存在: {user_id}", raw=raw
+                    retcode=10002, message=f"用户不存在: {user_id}", raw=raw
                 )
             data = {
                 "user_id": str(u.get("userId", "")),
@@ -450,12 +455,12 @@ class YunhuAdapter(BaseAdapter):
             )
             if raw.get("code") != 1:
                 return self._adapter.make_error(
-                    retcode=34001, message=raw.get("msg", "获取群信息失败"), raw=raw
+                    retcode=34100, message=raw.get("msg", "获取群信息失败"), raw=raw
                 )
             g = raw.get("data", {}).get("group", {})
             if self._adapter._web_entity_missing(raw, "group", "groupId"):
                 return self._adapter.make_error(
-                    retcode=34001, message=f"群不存在: {group_id}", raw=raw
+                    retcode=10002, message=f"群不存在: {group_id}", raw=raw
                 )
             data = {
                 "group_id": str(g.get("groupId", "")),
@@ -516,12 +521,12 @@ class YunhuAdapter(BaseAdapter):
                     upload_url, category, file_bytes, filename
                 )
             except Exception as e:
-                return adapter.make_error(retcode=34000, message=f"上传失败: {e}")
+                return adapter.make_error(retcode=34100, message=f"上传失败: {e}")
 
             try:
                 file_id = adapter._extract_upload_key(resp_json, category)
             except ValueError as e:
-                return adapter.make_error(retcode=34000, message=str(e), raw=resp_json)
+                return adapter.make_error(retcode=34100, message=str(e), raw=resp_json)
 
             return adapter.make_response(
                 data={"file_id": file_id, "name": name}, raw=resp_json
@@ -862,6 +867,10 @@ class YunhuAdapter(BaseAdapter):
                     }
                 ]
             )
+
+        def HTML(self, html: str):
+            """HTML 别名：与标准 Send 方法命名（全大写）保持一致"""
+            return self.Html(html)
 
         def Html(self, html: str):
             return self.Raw_ob12(
@@ -2344,13 +2353,14 @@ class YunhuAdapter(BaseAdapter):
 
         resp = self.make_response(
             status="ok" if is_ok else "failed",
-            retcode=0 if is_ok else 34000 + (raw_response.get("code") or 0),
+            retcode=0 if is_ok else 34100,
             data=raw_response.get("data") if is_ok else None,
             message_id=message_id,
             message=raw_response.get("msg", ""),
             raw=raw_response,
         )
-        resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+        if isinstance(resp.get("data"), dict):
+            resp["data"].setdefault("self_info", {"user_id": self._bot_ids.get(bot_name, "")})
 
         if "echo" in kwargs:
             resp["echo"] = kwargs["echo"]
@@ -2422,16 +2432,15 @@ class YunhuAdapter(BaseAdapter):
             return self.make_response(data=raw.get("data"), raw=raw)
         self.logger.warning(f"Web API 查询失败: {raw.get('msg', '未知错误') if isinstance(raw, dict) else raw}")
         return self.make_error(
-            retcode=34001,
+            retcode=10002,
             message=raw.get("msg", "Web API 请求失败") if isinstance(raw, dict) else str(raw),
             raw=raw,
         )
 
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
-        bot_name, bot = self._resolve_account(_account_id)
-
-        # 从 ApiDSL._merge_context 等来源可能带入 account_id，需从业务参数中剔除
-        params.pop("account_id", None)
+                # 标准字段 account_id 与旧名 _account_id 双兼容（ApiDSL.Using 传标准名）
+        account_id = params.pop("account_id", None) or _account_id
+        bot_name, bot = self._resolve_account(account_id)
 
         # 1. 不支持的 OneBot12 标准动作 → retcode=10002
         if endpoint in _UNSUPPORTED_STANDARD_ACTIONS:
@@ -2461,11 +2470,12 @@ class YunhuAdapter(BaseAdapter):
             )
             if self._web_entity_missing(raw, "bot", "botId"):
                 resp = self.make_error(
-                    retcode=34001, message=f"机器人不存在: {bot_id}", raw=raw
+                    retcode=10002, message=f"机器人不存在: {bot_id}", raw=raw
                 )
             else:
                 resp = self._standardize_web_result(raw)
-            resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+            if isinstance(resp.get("data"), dict):
+                resp["data"].setdefault("self_info", {"user_id": self._bot_ids.get(bot_name, "")})
             return resp
         if endpoint == "yunhu.user_homepage":
             query_user_id = str(params.get("user_id", ""))
@@ -2476,11 +2486,12 @@ class YunhuAdapter(BaseAdapter):
             )
             if self._web_entity_missing(raw, "user", "userId"):
                 resp = self.make_error(
-                    retcode=34001, message=f"用户不存在: {query_user_id}", raw=raw
+                    retcode=10002, message=f"用户不存在: {query_user_id}", raw=raw
                 )
             else:
                 resp = self._standardize_web_result(raw)
-            resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+            if isinstance(resp.get("data"), dict):
+                resp["data"].setdefault("self_info", {"user_id": self._bot_ids.get(bot_name, "")})
             return resp
 
         # 3. yunhu.* 平台扩展动作 → 路由到对应 POST 端点
@@ -2536,14 +2547,15 @@ class YunhuAdapter(BaseAdapter):
                 )
         else:
             resp = self.make_error(
-                retcode=34000 + (raw_response.get("code") or 0),
+                retcode=34100,
                 message=raw_response.get("msg", ""),
                 raw=raw_response,
             )
             if is_batch:
                 resp["message_id"] = []
 
-        resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+        if isinstance(resp.get("data"), dict):
+            resp["data"].setdefault("self_info", {"user_id": self._bot_ids.get(bot_name, "")})
 
         if "echo" in params:
             resp["echo"] = params["echo"]
@@ -2566,11 +2578,12 @@ class YunhuAdapter(BaseAdapter):
             resp = self.make_response(data=raw_response.get("data"), raw=raw_response)
         else:
             resp = self.make_error(
-                retcode=34000 + (raw_response.get("code") or 0),
+                retcode=34100,
                 message=raw_response.get("msg", ""),
                 raw=raw_response,
             )
-        resp["self"] = {"user_id": self._bot_ids.get(bot_name, "")}
+        if isinstance(resp.get("data"), dict):
+            resp["data"].setdefault("self_info", {"user_id": self._bot_ids.get(bot_name, "")})
 
         return resp
 
@@ -2592,6 +2605,9 @@ class YunhuAdapter(BaseAdapter):
                     f"Bot {bot_name} OneBot12事件数据: {json.dumps(onebot_event, ensure_ascii=False)}"
                 )
                 if onebot_event:
+                    # bot_id 只存在 _bot_ids，不回写账户；emit 前注入内部账户名供多账户路由
+                    if bot_name:
+                        onebot_event.setdefault("self", {})["account_id"] = bot_name
                     await self.adapter.emit(onebot_event)
 
         except Exception as e:

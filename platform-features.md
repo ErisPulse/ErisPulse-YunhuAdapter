@@ -6,8 +6,9 @@ YunhuAdapter 是基于云湖协议构建的适配器，整合了所有云湖功�
 
 ## 文档信息
 
-- 对应模块版本: 4.3.0
+- 对应模块版本: 4.6.2
 - 维护者: ErisPulse
+- 最后更新: 2026-11-10
 
 ## 基本信息
 
@@ -17,6 +18,95 @@ YunhuAdapter 是基于云湖协议构建的适配器，整合了所有云湖功�
 - 链式修饰支持：支持 `.Reply()` 等链式修饰方法
 - OneBot12兼容：支持发送 OneBot12 格式消息
 
+## v5 范式更新（4.4.0）
+
+本适配器已完成 v5 范式对齐（增量升级，API 兼容）：
+
+- **官方服务端API全集**（Api DSL 扩展方法）：编辑消息、批量发送、消息列表、用户/全局看板、群成员禁言、移除群成员、群消息类型控制、群标签 CRUD、用户打标签
+- **标准 keyboard 段**（跨平台交互组件标准）：{"type": "keyboard", "data": {"rows": [[{"label", "type": "callback|link", "data"}]]}} 段自动转换为云湖 buttons；.Buttons(rows) / .Keyboard(rows) 修饰器接受通用结构（原生结构向后兼容）
+- **交互回调标准字段**：按钮点击/A2UI 事件包含 interaction_id / button_data 标准字段
+- **spawn_background 任务归属**：WS 连接任务改用 `runtime.spawn_background`
+- **框架软依赖**：运行时检测 ErisPulse>=2.7.1 并提示；启动输出版本日志
+
+### 平台扩展动作（call / Api 方法）
+
+```python
+from ErisPulse import sdk
+yunhu = sdk.adapter.get("yunhu")
+
+# Api 方法（官方服务端API）
+await yunhu.Api.edit_message(msg_id, recv_id, "group", "text", {"text": "新内容"})
+await yunhu.Api.batch_send(["userId1", "userId2"], "text", {"text": "公告"})
+await yunhu.Api.get_message_list(group_id, "group", before=10)
+await yunhu.Api.set_user_board(chat_id, "group", "看板内容", expire_time=3600)
+await yunhu.Api.dismiss_global_board()
+await yunhu.Api.gag_group_member(group_id, user_id, 600)      # 禁言600秒，0=解除
+await yunhu.Api.remove_group_member(group_id, user_id)
+await yunhu.Api.set_group_msg_type_limit(group_id, "text,image")
+await yunhu.Api.create_group_tag(group_id, "VIP", color="#FF5733")
+await yunhu.Api.add_user_tag(group_id, user_id, "VIP")
+
+# 按钮点击回调（标准字段）
+from ErisPulse.Core.Event import notice
+
+@notice.on_notice()
+async def handle_button(event):
+    if event.get("platform") == "yunhu" and event.get("button_data"):
+        data = event["button_data"]     # 跨平台统一取值
+        interaction_id = event["interaction_id"]
+```
+
+> 完整标准说明见 跨平台交互组件标准。
+
+## 标准化对齐（4.6.2）
+
+本版本完成适配器标准化对齐，响应结构与错误码遵循 API 响应规范。
+
+### 账户与多账户闭环
+
+- **事件注入 `self.account_id`**（内部账户名）：接收到的事件 `self` 对象携带产生该事件的账户名，`event.reply()` 会自动路由到**受理该事件的账户**，多账户场景无需再手工 `Using(bot_id)`
+- **`call_api` 双兼容字段**：`account_id`（标准名）/ `_account_id`（旧名）均可指定账户，框架 ApiDSL（`Api.Using(...)`）自动适配
+- **`Send` 读取 `send_context`**（事件账户兜底）：在事件处理上下文中调用 `Send` 时默认回落到来源账户
+
+### 错误码规范
+
+| retcode | 含义 | 说明 |
+|---------|------|------|
+| 0 | 成功 | — |
+| 33001 | 网络错误 | 连接云湖服务器失败等网络类异常 |
+| 34100 | 平台失败 | 云湖返回失败；原始响应保留在 `yunhu_raw` |
+| 10002 | 不支持 | 资源不存在（机器人/用户/群不存在）或平台无对应能力的标准动作 |
+| 10003 | 参数错误 | 缺少或无效参数 |
+
+> **4.6.2 变化**：适配器补齐 `_platform` 后，`make_response` 由框架自动携带 `yunhu_raw`，平台失败统一返回 `34100`；"机器人/用户/群不存在" 从 `34001` 调整为 `10002`（资源不存在）。
+
+### 响应结构调整
+
+原响应顶层的非标准 `self` 字段移入 `data.self_info`（含 bot_id），顶层仅保留标准字段与 `yunhu_raw`：
+
+```json
+{
+  "status": "ok",
+  "retcode": 0,
+  "data": {
+    "self_info": {"user_id": "bot_id"},
+    "messageInfo": {"msgId": "..."}
+  },
+  "message_id": "123456",
+  "message": "",
+  "yunhu_raw": {}
+}
+```
+
+### 未知事件不再静默丢弃
+
+无法识别的云湖事件现产出 `type="unknown"` 事件（`detail_type` 为原始事件类型，原始数据保留在 `yunhu_raw`）并输出 warning 日志，模块可据此排查未接入的事件类型。
+
+### 平台扩展方法约定
+
+历史平台扩展方法（`edit_message` / `batch_send` / `set_user_board` / `gag_group_member` / `create_group_tag` 等）继续保留可用；**新增平台扩展统一走 `Api.call("yunhu.xxx", **params)`**（见下文「平台扩展动作」）。
+
+---
 ## 支持的消息发送类型
 
 所有发送方法均通过链式语法实现，例如：
@@ -29,8 +119,9 @@ await yunhu.Send.To("user", user_id).Text("Hello World!")
 
 支持的发送类型包括：
 - `.Text(text: str)`：发送纯文本消息。
-- `.Html(html: str)`：发送HTML格式消息。
+- `.Html(html: str)`：发送HTML格式消息。`.HTML(html)` 为别名（与标准 Send 方法命名保持一致）。
 - `.Markdown(markdown: str)`：发送Markdown格式消息。
+- `.MergeForward(nodes, title="合并聊天记录")`：发送合并转发消息（渲染为 `<details>` 折叠 HTML 卡片，经 html 通道发出）。
 - `.A2UI(text: str)`：发送A2UI格式消息。
 - `.Image(file: bytes, stream: bool = False, filename: str = None)`：发送图片消息，支持流式上传和自定义文件名。
 - `.Video(file: bytes, stream: bool = False, filename: str = None)`：发送视频消息，支持流式上传和自定义文件名。
@@ -38,8 +129,8 @@ await yunhu.Send.To("user", user_id).Text("Hello World!")
 - `.Batch(target_ids: List[str], message: str, content_type: str = "text", **kwargs)`：批量发送消息。
 - `.Edit(msg_id: str, text: str, content_type: str = "text", buttons: List = None)`：编辑已有消息。
 - `.Recall(msg_id: str)`：撤回消息。
-- `.Board(content: str, content_type: str = "text")`：发布公告看板。作用域由 `To()` 推断（有目标=本地，无目标=全局）。链式修饰：`.Expire(duration)` 相对过期（秒）、`.ExpireAt(timestamp)` 绝对过期（秒级时间戳）、`.ForMember(member_id)` 群成员看板。
-- `.DismissBoard()`：撤销公告看板。作用域同样由 `To()` 推断，支持 `.ForMember(member_id)`。
+- `.Board(content: str, content_type: str = "text")`：发布公告看板。作用域由 `To()` 推断（指定目标=本地看板，未指定=全局看板）。链式修饰：`.Expire(duration)` 相对过期（秒）、`.ExpireAt(timestamp)` 绝对过期（秒级时间戳）、`.ForMember(member_id)` 群成员看板；**内容为空时自动转为撤销看板**。仍兼容旧式 `Board("local", "公告")` 显式 scope 写法。
+- `.DismissBoard()`：撤销公告看板。作用域同样由 `To()` 推断，支持 `.ForMember(member_id)`；仍兼容旧式 `DismissBoard("local")` 写法。
 - `.Stream(content_type: str, content_generator: AsyncGenerator, **kwargs)`：发送流式消息。
 
 ### 群组管理方法
@@ -82,76 +173,22 @@ Board 作用域由 `To()` 自动推断：
 - 指定 `To(target_type, target_id)` → 本地看板（指定用户/群组）
 - 未指定 `To()` → 全局看板
 
-## 标准 API 动作（ApiDSL）
-
-除了 `Send` 链式发送，适配器还提供 `Api` 内部类，暴露 OneBot12 标准 API 动作与云湖平台扩展动作。所有方法返回标准响应格式。
-
 ```python
-from ErisPulse.Core import adapter
-yunhu = adapter.get("yunhu")
+# 本地看板（60 秒后相对过期）
+await yunhu.Send.To("group", group_id).Expire(60).Board("公告", content_type="markdown")
 
-# 信息查询（通过公开 Web API，无需鉴权）
-result = await yunhu.Api.get_self_info()              # 机器人自身信息
-result = await yunhu.Api.get_user_info("7058262")     # 任意用户信息
-result = await yunhu.Api.get_group_info("635409929")  # 群信息
+# 群成员看板（仅指定成员可见）
+await yunhu.Send.To("group", group_id).ForMember(user_id).Board("仅你可见")
 
-# 文件操作
-result = await yunhu.Api.upload_file(type="path", name="a.png", path="./a.png")
-result = await yunhu.Api.get_file("https://chat-file.jwznb.com/xxx")
+# 绝对时间戳过期
+await yunhu.Send.To("group", group_id).ExpireAt(1785208268).Board("指定时间过期")
 
-# 撤回消息（需额外提供 chat_id + chat_type）
-await yunhu.Api.delete_message("msg_id", chat_id="123", chat_type="group")
+# 全局看板
+await yunhu.Send.Board("全局公告")
 
-# 多账户：指定 Bot 账号
-info = await yunhu.Api.Using("bot1").get_self_info()
+# 清空本地看板（内容为空 → 自动撤销）
+await yunhu.Send.To("group", group_id).Board("")
 ```
-
-### 支持的标准动作
-
-| 方法 | 说明 | 数据来源 |
-|------|------|---------|
-| `get_self_info()` | 机器人自身信息 | 公开 Web API（bot-info） |
-| `get_user_info(user_id)` | 用户信息（任意用户可查） | 公开 Web API（user/homepage） |
-| `get_group_info(group_id)` | 群信息 | 公开 Web API（group-info） |
-| `upload_file(*, type, name, ...)` | 上传文件（自动判定 image/video/file） | Bot 开放 API |
-| `get_file(file_id)` | 获取文件（file_id 即 URL） | — |
-| `delete_message(message_id, *, chat_id, chat_type)` | 撤回消息 | Bot 开放 API（/bot/recall） |
-
-> **注意**：`get_self_info` / `get_user_info` / `get_group_info` 通过**非官方公开 Web API**（chat-web-go.jwzhd.com）实现，这些接口无需鉴权但非官方文档、可能随平台更新变动；查询不存在的用户/群/机器人时（服务端仍返回 code=1 但数据为空壳），适配器返回标准错误响应（`status=failed`、`retcode=34001`，如 message 为 `用户不存在: xxx`）。
-
-### 不支持的标准动作
-
-以下标准动作云湖无对应 API，调用时返回 `retcode=10002`（不支持的操作）：
-- `get_friend_list`（Bot 开放 API 的"机器人用户列表"尚在待上线状态）
-- `get_group_list` / `get_group_member_info` / `get_group_member_list`
-- `set_group_name` / `leave_group`
-
-### 平台扩展动作
-
-通过 `Api.call("yunhu.xxx", **params)` 调用云湖特有动作（参数采用 OB12 风格命名，适配器自动翻译为云湖字段）：
-
-| 扩展动作 | 说明 | 等价 Send 方法 |
-|---------|------|---------------|
-| `yunhu.recall` | 撤回消息（msg_id, chat_id, chat_type） | `Send.To(...).Recall(msg_id)` |
-| `yunhu.kick` | 移除群成员（group_id, user_id） | `Send.To("group", g).Kick(uid)` |
-| `yunhu.ban` | 禁言（group_id, user_id, duration） | `Send.To("group", g).Ban(uid, duration)` |
-| `yunhu.unban` | 解除禁言（group_id, user_id） | `Send.To("group", g).Ban(uid, duration=0)` |
-| `yunhu.tag.create/edit/delete/list` | 群标签 CRUD（group_id, ...） | `Send.To("group", g).CreateTag(...)` 等 |
-| `yunhu.tag.relate` / `yunhu.tag.relate_cancel` | 给用户添加/移除标签 | `Send.To("group", g).AddUserTag(...)` 等 |
-| `yunhu.set_member_title` / `yunhu.unset_member_title` | **成员头衔语义别名**（标签≈头衔，内部映射到 tag.relate） | — |
-| `yunhu.msg_type_limit` | 群消息类型限制（group_id, type） | `Send.To("group", g).SetMsgTypeLimit(...)` |
-| `yunhu.get_messages` | 获取历史消息（chat_id, chat_type, message_id?, before?, after?） | `Send.To(...).GetMessages(...)` |
-| `yunhu.bot_info` | 公开 bot-info 查询（bot_id） | — |
-| `yunhu.user_homepage` | 公开用户主页查询（user_id） | — |
-
-```python
-# 平台扩展示例
-await yunhu.Api.call("yunhu.kick", group_id="123", user_id="456")
-await yunhu.Api.call("yunhu.set_member_title", group_id="123", user_id="456", title="VIP")
-result = await yunhu.Api.call("yunhu.get_messages", chat_id="123", chat_type="group", before=10)
-```
-
-> **标签与头衔**：云湖的"标签"语义等同 OneBot12 群成员 `title`。`yunhu.set_member_title` 是 `yunhu.tag.relate` 的原生语义别名，二者内部映射到同一端点。群消息事件中发送者角色由 `senderUserLevel` 映射到标准 `role` 字段（owner/admin/member）。
 
 ### 按钮参数说明
 
@@ -278,6 +315,80 @@ ob12_msg = [{"type": "text", "data": {"text": "回复消息"}}]
 await yunhu.Send.To("group", group_id).Reply(msg_id).Raw_ob12(ob12_msg)
 ```
 
+## 标准 API 动作（ApiDSL）
+
+> [!NOTE]
+> 本特性需要 ErisPulse **2.7.0+** 且 YunhuAdapter **4.3.0+**。
+
+除了 `Send` 链式发送，适配器还提供 `Api` 内部类，暴露 OneBot12 标准 API 动作与云湖平台扩展动作。所有方法返回标准响应格式。
+
+```python
+from ErisPulse.Core import adapter
+yunhu = adapter.get("yunhu")
+
+# 信息查询（通过公开 Web API，无需鉴权）
+result = await yunhu.Api.get_self_info()              # 机器人自身信息
+result = await yunhu.Api.get_user_info("7058262")     # 任意用户信息
+result = await yunhu.Api.get_group_info("635409929")  # 群信息
+
+# 文件操作
+result = await yunhu.Api.upload_file(type="path", name="a.png", path="./a.png")
+result = await yunhu.Api.get_file("https://chat-file.jwznb.com/xxx")
+
+# 撤回消息（需额外提供 chat_id + chat_type）
+await yunhu.Api.delete_message("msg_id", chat_id="123", chat_type="group")
+
+# 多账户：指定 Bot 账号
+info = await yunhu.Api.Using("bot1").get_self_info()
+```
+
+### 支持的标准动作
+
+| 方法 | 说明 | 数据来源 |
+|------|------|---------|
+| `get_self_info()` | 机器人自身信息 | 公开 Web API（bot-info） |
+| `get_user_info(user_id)` | 用户信息（任意用户可查） | 公开 Web API（user/homepage） |
+| `get_group_info(group_id)` | 群信息 | 公开 Web API（group-info） |
+| `upload_file(*, type, name, ...)` | 上传文件（自动判定 image/video/file） | Bot 开放 API |
+| `get_file(file_id)` | 获取文件（file_id 即 URL） | — |
+| `delete_message(message_id, *, chat_id, chat_type)` | 撤回消息 | Bot 开放 API（/bot/recall） |
+
+> **注意**：`get_self_info` / `get_user_info` / `get_group_info` 通过**非官方公开 Web API**（chat-web-go.jwzhd.com）实现，这些接口无需鉴权但非官方文档、可能随平台更新变动；失败时返回标准错误响应。
+
+### 不支持的标准动作
+
+以下标准动作云湖无对应 API，调用时返回 `retcode=10002`（不支持的操作）：
+- `get_friend_list`（Bot 开放 API 的"机器人用户列表"尚在待上线状态）
+- `get_group_list` / `get_group_member_info` / `get_group_member_list`
+- `set_group_name` / `leave_group`
+
+### 平台扩展动作
+
+通过 `Api.call("yunhu.xxx", **params)` 调用云湖特有动作（参数采用 OB12 风格命名，适配器自动翻译为云湖字段）：
+
+| 扩展动作 | 说明 | 等价 Send 方法 |
+|---------|------|---------------|
+| `yunhu.recall` | 撤回消息（msg_id, chat_id, chat_type） | `Send.To(...).Recall(msg_id)` |
+| `yunhu.kick` | 移除群成员（group_id, user_id） | `Send.To("group", g).Kick(uid)` |
+| `yunhu.ban` | 禁言（group_id, user_id, duration） | `Send.To("group", g).Ban(uid, duration)` |
+| `yunhu.unban` | 解除禁言（group_id, user_id） | `Send.To("group", g).Ban(uid, duration=0)` |
+| `yunhu.tag.create/edit/delete/list` | 群标签 CRUD（group_id, ...） | `Send.To("group", g).CreateTag(...)` 等 |
+| `yunhu.tag.relate` / `yunhu.tag.relate_cancel` | 给用户添加/移除标签 | `Send.To("group", g).AddUserTag(...)` 等 |
+| `yunhu.set_member_title` / `yunhu.unset_member_title` | **成员头衔语义别名**（标签≈头衔，内部映射到 tag.relate） | — |
+| `yunhu.msg_type_limit` | 群消息类型限制（group_id, type） | `Send.To("group", g).SetMsgTypeLimit(...)` |
+| `yunhu.get_messages` | 获取历史消息（chat_id, chat_type, message_id?, before?, after?） | `Send.To(...).GetMessages(...)` |
+| `yunhu.bot_info` | 公开 bot-info 查询（bot_id） | — |
+| `yunhu.user_homepage` | 公开用户主页查询（user_id） | — |
+
+```python
+# 平台扩展示例
+await yunhu.Api.call("yunhu.kick", group_id="123", user_id="456")
+await yunhu.Api.call("yunhu.set_member_title", group_id="123", user_id="456", title="VIP")
+result = await yunhu.Api.call("yunhu.get_messages", chat_id="123", chat_type="group", before=10)
+```
+
+> **标签与头衔**：云湖的"标签"语义等同 OneBot12 群成员 `title`。`yunhu.set_member_title` 是 `yunhu.tag.relate` 的原生语义别名，二者内部映射到同一端点。群消息事件中发送者角色由 `senderUserLevel` 映射到标准 `role` 字段（owner/admin/member）。
+
 ## 发送方法返回值
 
 所有发送方法均返回一个 Task 对象，可以直接 await 获取发送结果。返回结果遵循 ErisPulse 适配器标准化返回规范：
@@ -286,13 +397,14 @@ await yunhu.Send.To("group", group_id).Reply(msg_id).Raw_ob12(ob12_msg)
 {
     "status": "ok",           // 执行状态
     "retcode": 0,             // 返回码
-    "data": {...},            // 响应数据
-    "self": {...},            // 自身信息（包含 bot_id）
+    "data": {...},            // 响应数据（self_info 含 bot_id，见「响应结构调整」）
     "message_id": "123456",   // 消息ID
     "message": "",            // 错误信息
     "yunhu_raw": {...}        // 原始响应数据
 }
 ```
+
+> **4.6.2 变化**：原响应顶层的非标准 `self` 字段已移入 `data.self_info`。获取 bot_id 请改用 `result["data"]["self_info"]["user_id"]`。
 
 ## 特有事件类型
 
@@ -307,7 +419,10 @@ await yunhu.Send.To("group", group_id).Reply(msg_id).Raw_ob12(ob12_msg)
     - A2UI按钮点击：yunhu_a2ui_button
     - 机器人设置：yunhu_bot_setting
     - 快捷菜单：yunhu_shortcut_menu
-2. 扩展字段：
+2. 标准字段扩展（4.3.0+）：
+    - 消息事件新增标准 `role` 字段（由云湖 `senderUserLevel` 映射为 `owner`/`admin`/`member`）
+    - 新增 `user_avatar` 字段（发送者头像 URL）
+3. 扩展字段：
     - 所有特有字段均以yunhu_前缀标识
     - 保留原始数据在yunhu_raw字段
     - 私聊中self.user_id表示机器人ID
@@ -473,6 +588,43 @@ await yunhu.Send.To("user", user_id).A2UI("A2UI交互卡片内容")
 }
 ```
 
+## Event Mixin 扩展方法
+
+适配器注册了以下平台专有方法，仅在 `platform == "yunhu"` 时可用：
+
+| 方法 | 返回类型 | 说明 |
+|------|----------|------|
+| `get_raw_event()` | `dict` | 获取云湖原始事件数据（`yunhu_raw`） |
+| `get_sender_level()` | `str` | 发送者云湖原生级别（owner/administrator/member/unknown） |
+| `get_sender_role()` | `str` | 发送者 OneBot12 标准 role（owner/admin/member） |
+| `get_sender_title()` | `str` | 发送者头衔（标准 `title` 字段访问器，预留） |
+| `get_sender_avatar()` | `str` | 发送者头像 URL |
+| `get_command()` | `dict` | 指令数据（仅指令消息事件，`yunhu_command`） |
+| `get_button_value()` | `str` | 按钮点击事件的 value（`yunhu_button.value`） |
+| `get_a2ui_action()` | `str` | A2UI 按钮事件的 actionName |
+| `get_a2ui_form_context()` | `dict` | A2UI 按钮事件的表单上下文 |
+| `get_menu_id()` | `str` | 快捷菜单事件 ID（`yunhu_menu.id`） |
+| `get_setting()` | `dict` | 机器人设置事件的设置数据（`yunhu_setting`） |
+| `is_command_message()` | `bool` | 是否为指令消息 |
+| `is_button_click()` | `bool` | 是否为按钮点击事件 |
+| `is_a2ui_button()` | `bool` | 是否为 A2UI 按钮事件 |
+
+```python
+from ErisPulse.Core.Event import notice
+
+@notice.on_notice()
+async def handle_yunhu_notice(event):
+    if event.get("platform") != "yunhu":
+        return
+
+    if event.is_button_click():
+        value = event.get_button_value()
+        await event.reply(f"你点击了按钮: {value}")
+
+    if event.get("detail_type") == "yunhu_shortcut_menu":
+        menu_id = event.get_menu_id()
+```
+
 ## 扩展字段说明
 
 - 所有特有字段均以 `yunhu_` 前缀标识，避免与标准字段冲突
@@ -537,7 +689,7 @@ async def handle_message(event):
 # config.toml
 [Yunhu_Adapter.accounts.bot1]
 token = "your_bot1_token"  # 机器人token（必填）
-mode = "ws"  # 接收模式（可选，默认为"ws"）
+mode = "ws"  # 接收模式（可选，默认为"ws"，可选值："ws"、"webhook"）
 webhook_path = "/webhook/bot1"  # Webhook路径（可选，默认为"/webhook"）
 enabled = true  # 是否启用（可选，默认为true）
 
@@ -549,13 +701,13 @@ enabled = true
 
 **配置项说明：**
 - `token`：云湖平台提供的API token（必填）
-- `mode`：接收模式（可选，默认为"ws"，可选值："ws"、"webhook"）
-- `webhook_path`：接收云湖事件的HTTP路径（可选，默认为"/webhook"）
+- `mode`：接收模式（可选，默认为 `"ws"`，可选值 `"ws"`、`"webhook"`）
+- `webhook_path`：接收云湖事件的HTTP路径（可选，默认为"/webhook"，仅 webhook 模式使用）
 - `enabled`：是否启用该账户（可选，默认为true）
 
 **重要提示：**
-1. 云湖平台的机器人ID在运行时自动检测，无需在配置中指定
-2. 每个bot都应该有独立的`webhook_path`，以便接收各自的webhook事件
+1. 云湖平台的机器人ID在**运行时自动检测**，无需在配置中指定
+2. webhook 模式下每个bot都应该有独立的`webhook_path`，以便接收各自的webhook事件
 3. 在云湖平台配置webhook时，请为每个bot配置对应的URL，例如：
    - Bot1: `https://your-domain.com/webhook/bot1`
    - Bot2: `https://your-domain.com/webhook/bot2`
@@ -584,7 +736,7 @@ await yunhu.Send.To("user", "user123").Text("Hello from default bot!")
 
 ### 事件中的Bot标识
 
-接收到的事件会自动包含对应的`bot_id`信息：
+接收到的事件会自动包含对应的`bot_id`信息（4.6.2 起同时注入内部账户名 `self.account_id`）：
 
 ```python
 from ErisPulse.Core.Event import message
@@ -594,15 +746,21 @@ async def handle_message(event):
     if event["platform"] == "yunhu":
         # 获取触发事件的机器人ID
         bot_id = event["self"]["user_id"]
-        print(f"消息来自Bot: {bot_id}")
-        
-        # 使用相同bot回复消息
+        account_id = event["self"].get("account_id", "")  # 内部账户名（如 bot1）
+        print(f"消息来自Bot: {bot_id}（账户: {account_id}）")
+
+        # 4.6.2 起 event.reply() 自动路由到受理账户，直接回复即可
+        await event.reply("回复消息")
+
+        # 仍可显式指定账户发送
         yunhu = adapter.get("yunhu")
         await yunhu.Send.Using(bot_id).To(
             event["detail_type"],
             event["user_id"] if event["detail_type"] == "private" else event["group_id"]
         ).Text("回复消息")
 ```
+
+> **提示**：`call_api` 支持双兼容账户字段：`account_id`（标准名）与 `_account_id`（旧名），框架 ApiDSL 的 `Using()` 与事件账户兜底（`send_context`）均自动适配。
 
 ### 日志信息
 
@@ -631,4 +789,4 @@ yunhu.bots["bot1"].enabled = False
 
 ### 旧配置兼容
 
-系统会自动兼容旧格式的配置，但建议迁移到新配置格式以获得更好的多bot支持。
+旧版 `[Yunhu_Adapter.bots.*]` 配置（含 `bot_id` 字段）会自动迁移到 `accounts` 格式（`bot_id` 已改为运行时自动检测，配置中的值会被忽略）；建议尽快迁移到新格式。

@@ -124,11 +124,14 @@ class YunhuConverter(BaseConverter):
         }
 
         handler = handler_map.get(mapped_type)
-        return (
-            handler(event_type, data.get("event", {}), onebot_event)
-            if handler
-            else None
-        )
+        if handler:
+            return handler(event_type, data.get("event", {}), onebot_event)
+
+        # 无法识别的事件：不再静默丢弃，返回 unknown 事件（原始数据保留在 yunhu_raw）并告警
+        logger.warning(f"未识别的云湖事件类型: {event_type}（映射: {mapped_type or '无'}）")
+        onebot_event["type"] = "unknown"
+        onebot_event["detail_type"] = mapped_type or event_type or "unknown"
+        return onebot_event
 
     def _handle_message_event(
         self, event_type: str, event_data: Dict, base_event: Dict
