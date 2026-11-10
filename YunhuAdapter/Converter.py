@@ -503,6 +503,8 @@ class YunhuConverter(BaseConverter):
             "file_id": raw_url,
             "url": raw_url,
             "file_name": content.get(name_key, ""),
+            # 云湖媒体 CDN 有 Referer 防盗链：裸 GET 403，下载需携带此头
+            "headers": {"Referer": "https://im.jwzhd.com/"},
         }
 
         # 添加类型特定字段

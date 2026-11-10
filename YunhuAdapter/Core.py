@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import html as _html
+import inspect
 import io
 import json
 import re
@@ -25,7 +26,7 @@ try:
 except ImportError:  # pragma: no cover
     spawn_background = None
 
-__version__ = "4.6.2"
+__version__ = "4.6.3"
 
 # 软依赖的框架最低版本（运行时检测，仅提示不强制）
 MIN_FRAMEWORK_VERSION = (2, 7, 1)
@@ -2437,6 +2438,19 @@ class YunhuAdapter(BaseAdapter):
             raw=raw,
         )
 
+    # 标准 Web 动作：Api 内嵌类经公开 Web API 实现（非机器人 open API）
+    _STANDARD_WEB_ACTIONS = ("get_self_info", "get_user_info", "get_group_info")
+
+    # 云湖媒体 CDN 防盗链：裸 GET 403，必须携带客户端 Referer
+    MEDIA_REFERER = "https://im.jwzhd.com/"
+
+    async def _download_media(self, url: str) -> tuple[bytes, str]:
+        """下载云湖媒体（自动携带 Referer 过防盗链），返回 (字节, content_type)"""
+        headers = {"Referer": self.MEDIA_REFERER}
+        resp = await client.get(url, headers=headers)
+        data = await resp.read()
+        return data, resp.headers.get("Content-Type", "")
+
     async def call_api(self, endpoint: str, _account_id: str = None, **params):
                 # 标准字段 account_id 与旧名 _account_id 双兼容（ApiDSL.Using 传标准名）
         account_id = params.pop("account_id", None) or _account_id
@@ -2447,6 +2461,34 @@ class YunhuAdapter(BaseAdapter):
             return self.make_error(
                 retcode=10002,
                 message=f"云湖适配器不支持的标准动作: {endpoint}",
+            )
+
+        # 1.5 标准 Web 动作 → Api 内嵌类（公开 Web API 实现）
+        # 必须在此路由：掉进下面的 POST 兜底会打机器人 open API（参数风格不认，
+        # 返回空非 JSON）。媒体下载走 get_file（云湖 CDN 有 Referer 防盗链）
+        if endpoint in self._STANDARD_WEB_ACTIONS:
+            api_method = getattr(self.Api, endpoint)
+            accepted = set(inspect.signature(api_method).parameters)
+            web_params = {k: v for k, v in params.items() if k in accepted}
+            return await api_method(**web_params)
+
+        if endpoint == "get_file":
+            file_url = str(params.get("file_id") or params.get("url") or "")
+            if not file_url:
+                return self.make_error(retcode=10003, message="缺少 file_id/url")
+            try:
+                file_data, content_type = await self._download_media(file_url)
+            except Exception as e:
+                return self.make_error(
+                    retcode=33001, message=f"媒体下载失败: {e}"
+                )
+            return self.make_response(
+                data={
+                    "file_name": file_url.rsplit("/", 1)[-1],
+                    "content_type": content_type,
+                    "base64": base64.b64encode(file_data).decode(),
+                    "size": len(file_data),
+                }
             )
 
         # 2. 特殊扩展动作（非 POST / 走 web API）
